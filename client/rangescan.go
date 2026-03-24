@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/otfabric/s7comm/model"
+	"github.com/otfabric/go-s7comm/model"
 )
 
 // RangeProbeRequest configures a read-range scan over an area.

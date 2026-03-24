@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/otfabric/go-cotp"
-	"github.com/otfabric/s7comm/transport"
-	"github.com/otfabric/s7comm/wire"
+	"github.com/otfabric/go-s7comm/transport"
+	"github.com/otfabric/go-s7comm/wire"
 )
 
 // jitterRNG returns a private RNG for jitter in this call (avoids package-global rand for reproducibility).

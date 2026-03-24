@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/otfabric/s7comm/transport"
+	"github.com/otfabric/go-s7comm/transport"
 )
 
 func TestCloseClearsConnection(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/otfabric/s7comm/model"
-	"github.com/otfabric/s7comm/wire"
+	"github.com/otfabric/go-s7comm/model"
+	"github.com/otfabric/go-s7comm/wire"
 )
 
 func TestReadAreaInvalidAddress(t *testing.T) {

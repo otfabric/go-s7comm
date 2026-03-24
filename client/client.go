@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 
 	"github.com/otfabric/go-cotp"
-	"github.com/otfabric/s7comm/model"
-	"github.com/otfabric/s7comm/transport"
-	"github.com/otfabric/s7comm/wire"
+	"github.com/otfabric/go-s7comm/model"
+	"github.com/otfabric/go-s7comm/transport"
+	"github.com/otfabric/go-s7comm/wire"
 )
 
 // ErrNotConnected is returned when an operation requires an active connection but the client is not connected.

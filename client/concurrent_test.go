@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/otfabric/s7comm/model"
+	"github.com/otfabric/go-s7comm/model"
 )
 
 // TestReadAreaConcurrent exercises multiple goroutines calling ReadArea on the same client.

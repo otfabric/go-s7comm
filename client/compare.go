@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/otfabric/s7comm/model"
+	"github.com/otfabric/go-s7comm/model"
 )
 
 // RackSlot is a rack/slot pair for compare or probe operations.

@@ -1,6 +1,6 @@
 package model
 
-import "github.com/otfabric/s7comm/model/codec"
+import "github.com/otfabric/go-s7comm/model/codec"
 
 // Data conversion helpers for S7 types (big-endian). Implementations live in model/codec;
 // these wrappers preserve the model package API.

@@ -1,4 +1,24 @@
-# Release v0.6.2
+# go-s7comm Releases
+
+## v0.6.3
+
+**Date:** 2026-03-24
+**Previous release:** v0.6.2
+
+## Summary
+
+- **Module rename**: Module path changed from `github.com/otfabric/s7comm` to `github.com/otfabric/go-s7comm` to align with the `go-` prefix naming convention used across otfabric Go libraries (e.g. go-tpkt, go-cotp).
+- **Minimum Go version**: Raised from 1.22 to **1.23** in `go.mod`.
+- **CI workflow**: Replaced single `test.yml` with dedicated `ci.yml` that calls the shared reusable workflow `otfabric/.github/.github/workflows/go-ci.yml@v2`. Test matrix covers Go 1.23–1.26 on ubuntu and Windows; coverage uploads to Codecov.
+- **Release workflow**: New `release.yml` calls the shared reusable workflow `otfabric/.github/.github/workflows/go-package-release.yml@v2` with `workflow_dispatch` for manual patch/minor/major bumps.
+
+## Breaking changes
+
+- **Import path**: All consumers must update their imports from `github.com/otfabric/s7comm/...` to `github.com/otfabric/go-s7comm/...`.
+
+---
+
+## v0.6.2
 
 **Date:** 2026-03-13
 **Previous release:** v0.6.1
@@ -17,7 +37,7 @@
 - None.
 
 ---
-# Release v0.6.0
+## v0.6.0
 
 **Date:** 2026-03-13
 **Previous release:** v0.5.1
@@ -43,7 +63,7 @@
 - **ReadResult**: Field `Error` renamed to `Message`. Callers that read or set `result.Error` must switch to `result.Message`.
 
 ---
-# Release v0.5.1
+## v0.5.1
 
 **Date:** 2026-03-13
 **Previous release:** v0.5.0
@@ -62,7 +82,7 @@
 - None.
 
 ---
-# Release v0.5.0
+## v0.5.0
 
 **Date:** 2026-03-13
 **Previous release:** v0.4.0
@@ -80,7 +100,7 @@
 - **transport**: `Send` now expects TPDU payload (e.g. COTP bytes); it writes one TPKT frame. `Receive` returns the TPKT payload only (no longer the full TPKT frame bytes). Callers that previously built full TPKT frames and passed them to `Send` must now pass only the inner payload.
 
 ---
-# Release v0.4.0
+## v0.4.0
 
 **Date:** 2026-03-13
 **Previous release:** v0.3.1
@@ -109,7 +129,7 @@
 - **Read methods**: All read methods now return `(*ReadResult, error)` instead of `([]byte, error)`. Callers must use `result, err := c.ReadDB(...)`; check `err` for connection failure; then check `result.OK()` or `result.Err()` and use `result.Data` for the payload.
 
 ---
-# Release v0.3.1
+## v0.3.1
 
 **Date:** 2026-03-13
 **Previous release:** v0.2.1
@@ -124,7 +144,7 @@
 - **Breaking**: Code that relied on `Class*` constants or on `ReachableTCP`/`ReachableCOTP`/`Classification` must switch to `Status`, `S7SetupOK`, and `SZLQueryOK`.
 
 ---
-# Release v0.2.1
+## v0.2.1
 
 **Date:** 2026-03-13
 **Previous release:** v0.2.0
@@ -136,7 +156,7 @@
 
 ---
 
-# Release v0.2.0
+## v0.2.0
 
 **Date:** 2026-03-13
 **Previous release:** v0.1.0
@@ -153,7 +173,7 @@
 
 ---
 
-# Release v0.1.0
+## v0.1.0
 
 **Date:** 2026-03-13
 **Previous release:** v0.0.0

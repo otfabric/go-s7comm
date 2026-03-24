@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/otfabric/s7comm/model"
-	"github.com/otfabric/s7comm/wire"
+	"github.com/otfabric/go-s7comm/model"
+	"github.com/otfabric/go-s7comm/wire"
 )
 
 // ValidationError indicates invalid caller input (e.g. negative start/size, invalid range).

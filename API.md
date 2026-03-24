@@ -1,4 +1,4 @@
-# API Reference: otfabric/s7comm
+# API Reference: otfabric/go-s7comm
 
 This document describes the public API exposed by the module and gives practical behavior notes.
 
@@ -12,7 +12,7 @@ This document describes the public API exposed by the module and gives practical
 ## client
 
 ```go
-import "github.com/otfabric/s7comm/client"
+import "github.com/otfabric/go-s7comm/client"
 ```
 
 ### Construction and lifecycle
@@ -416,7 +416,7 @@ Defaults:
 ## model
 
 ```go
-import "github.com/otfabric/s7comm/model"
+import "github.com/otfabric/go-s7comm/model"
 ```
 
 ### Addressing and enums
@@ -506,7 +506,7 @@ Transport uses **github.com/otfabric/go-tpkt** for TPKT framing: `Send` writes t
 **Invariant:** `Receive()` returns exactly one TPKT payload. In the S7 connection and data flow this payload is always one complete COTP TPDU (e.g. CC, DT). Callers never receive raw S7 bytes directly; S7 payload is carried inside COTP DT `UserData` and must be extracted via `cotp.Decode` and `dec.DT.UserData`.
 
 ```go
-import "github.com/otfabric/s7comm/transport"
+import "github.com/otfabric/go-s7comm/transport"
 ```
 
 ```go
@@ -532,7 +532,7 @@ func (c *Conn) RemoteAddr() net.Addr
 ## wire
 
 ```go
-import "github.com/otfabric/s7comm/wire"
+import "github.com/otfabric/go-s7comm/wire"
 ```
 
 ### TPKT and COTP

@@ -1,11 +1,11 @@
-# otfabric/s7comm - Siemens S7 Protocol Library for Go
+# otfabric/go-s7comm - Siemens S7 Protocol Library for Go
 
-[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/otfabric/s7comm)](https://goreportcard.com/report/github.com/otfabric/s7comm)
-[![CI](https://github.com/otfabric/s7comm/actions/workflows/test.yml/badge.svg)](https://github.com/otfabric/s7comm/actions/workflows/test.yml)
-[![Codecov](https://codecov.io/gh/otfabric/s7comm/graph/badge.svg)](https://app.codecov.io/gh/otfabric/s7comm)
-[![Release](https://img.shields.io/github/v/release/otfabric/s7comm?label=release)](https://github.com/otfabric/s7comm/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/otfabric/go-s7comm)](https://goreportcard.com/report/github.com/otfabric/go-s7comm)
+[![CI](https://github.com/otfabric/go-s7comm/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/go-s7comm/actions/workflows/ci.yml)
+[![Codecov](https://codecov.io/gh/otfabric/go-s7comm/graph/badge.svg)](https://app.codecov.io/gh/otfabric/go-s7comm)
+[![Release](https://img.shields.io/github/v/release/otfabric/go-s7comm?label=release)](https://github.com/otfabric/go-s7comm/releases)
 
 A pure Go implementation of the Siemens S7 communication protocol. It builds on [go-tpkt](https://github.com/otfabric/go-tpkt) for RFC 1006 TPKT framing and [go-cotp](https://github.com/otfabric/go-cotp) for COTP (X.224) encode/decode.
 
@@ -35,10 +35,10 @@ Context cancellation is only strongly effective when the context has a deadline;
 ## Install
 
 ```sh
-go get github.com/otfabric/s7comm
+go get github.com/otfabric/go-s7comm
 ```
 
-Requires Go 1.22 or later.
+Requires Go 1.23 or later.
 
 ## Quickstart
 
@@ -51,7 +51,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/otfabric/s7comm/client"
+	"github.com/otfabric/go-s7comm/client"
 )
 
 func main() {
@@ -148,8 +148,8 @@ Scan an area to discover which byte ranges are readable (client must be connecte
 
 ```go
 import (
-	"github.com/otfabric/s7comm/client"
-	"github.com/otfabric/s7comm/model"
+	"github.com/otfabric/go-s7comm/client"
+	"github.com/otfabric/go-s7comm/model"
 )
 
 result, err := c.ProbeReadableRanges(ctx, client.RangeProbeRequest{
@@ -172,8 +172,8 @@ Run the same read across multiple rack/slot candidates to detect whether the end
 
 ```go
 import (
-	"github.com/otfabric/s7comm/client"
-	"github.com/otfabric/s7comm/model"
+	"github.com/otfabric/go-s7comm/client"
+	"github.com/otfabric/go-s7comm/model"
 )
 
 result, err := client.CompareRead(ctx, client.CompareReadRequest{
@@ -189,7 +189,7 @@ result, err := client.CompareRead(ctx, client.CompareReadRequest{
 // result.RackSlotInsensitive = true if all succeeded with identical data
 ```
 
-For CLI usage see [s7commctl probe rackslot](https://github.com/otfabric/s7commctl):
+For CLI usage see [s7commctl probe rackslot](https://github.com/otfabric/go-s7commctl):
 
 ```sh
 s7commctl probe rackslot --ip 192.168.0.10

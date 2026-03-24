@@ -7,9 +7,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/otfabric/s7comm/model"
-	"github.com/otfabric/s7comm/transport"
-	"github.com/otfabric/s7comm/wire"
+	"github.com/otfabric/go-s7comm/model"
+	"github.com/otfabric/go-s7comm/transport"
+	"github.com/otfabric/go-s7comm/wire"
 )
 
 // classifyOpError maps operation failures to ReadStatus for consistent read-path semantics.

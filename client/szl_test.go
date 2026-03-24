@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/otfabric/s7comm/model"
+	"github.com/otfabric/go-s7comm/model"
 )
 
 func TestPopulateInfoFromRaw(t *testing.T) {
