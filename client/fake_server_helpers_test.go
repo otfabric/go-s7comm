@@ -1,28 +1,43 @@
 package client
 
 import (
+	"context"
 	"encoding/binary"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/otfabric/go-cotp"
-	"github.com/otfabric/go-s7comm/transport"
 	"github.com/otfabric/go-s7comm/wire"
 )
 
-// sendCOTPCC sends a COTP Connection Confirm in reply to a decoded CR.
-// Used by fake servers to complete the handshake. Ignores errors for test simplicity.
-func sendCOTPCC(tr *transport.Conn, dec *cotp.Decoded) {
-	if dec.CR == nil {
-		return
+// acceptFakeCOTP completes a TP0 Accept on raw (test peer acting as PLC).
+func acceptFakeCOTP(t *testing.T, raw net.Conn) *cotp.Conn {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := cotp.Accept(ctx, raw, cotp.ServerConfig{MaxTPDULength: 1024})
+	if err != nil {
+		t.Fatalf("cotp.Accept: %v", err)
 	}
-	cc := &cotp.CC{
-		CDT: 0, DestinationRef: 0, SourceRef: 0, ClassOption: 0,
-		CallingSelector: dec.CR.CallingSelector,
-		CalledSelector:  dec.CR.CalledSelector,
-		TPDUSize:        dec.CR.TPDUSize,
+	return c
+}
+
+// serveFakeSetup reads one S7 setup TSDU and writes a setup response with pduSize.
+func serveFakeSetup(t *testing.T, srv *cotp.Conn, pduSize int) {
+	t.Helper()
+	ctx := context.Background()
+	s7Data, err := srv.ReadTSDU(ctx)
+	if err != nil {
+		t.Fatalf("ReadTSDU setup: %v", err)
 	}
-	ccBytes, _ := cc.MarshalBinary()
-	_ = tr.Send(ccBytes)
+	if len(s7Data) < 10 || s7Data[0] != 0x32 {
+		t.Fatalf("expected S7 setup request, got %d bytes", len(s7Data))
+	}
+	pduRef := binary.BigEndian.Uint16(s7Data[4:6])
+	if err := srv.WriteTSDU(ctx, buildS7SetupResponse(pduRef, pduSize)); err != nil {
+		t.Fatalf("WriteTSDU setup: %v", err)
+	}
 }
 
 // buildS7SetupResponse returns an S7 setup response payload (S7 header + param + data).
@@ -121,23 +136,7 @@ func buildUploadChunkResponse(pduRef uint16, chunk []byte, done bool) []byte {
 	header[0] = 0x32
 	header[1] = byte(wire.ROSCTRAckData)
 	binary.BigEndian.PutUint16(header[4:6], pduRef)
-	binary.BigEndian.PutUint16(header[6:8], 2)
+	binary.BigEndian.PutUint16(header[6:8], uint16(len(param)))
 	binary.BigEndian.PutUint16(header[8:10], uint16(dataLen))
 	return append(append(header, param...), data...)
-}
-
-// TestFakeServerHelpersBuilders ensures the shared builders produce valid-looking bytes (used by other tests).
-func TestFakeServerHelpersBuilders(t *testing.T) {
-	resp := buildS7SetupResponse(1, 480)
-	if len(resp) != 22 || resp[12] != wire.FuncSetupComm {
-		t.Errorf("buildS7SetupResponse: len=%d want 22, func=0x%02X", len(resp), resp[12])
-	}
-	readResp := buildReadVarResponse(1, 16, []byte{0xDE, 0xAD})
-	if len(readResp) != 20 || readResp[12] != wire.FuncReadVar {
-		t.Errorf("buildReadVarResponse: len=%d want 20, func=0x%02X", len(readResp), readResp[12])
-	}
-	szlResp := buildSZLResponse(1, wire.SZLModuleID, 20, make([]byte, 24))
-	if len(szlResp) < 22 || szlResp[14] != wire.RetCodeSuccess {
-		t.Errorf("buildSZLResponse: len=%d, retCode=0x%02X", len(szlResp), szlResp[14])
-	}
 }

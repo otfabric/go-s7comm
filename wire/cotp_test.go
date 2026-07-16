@@ -2,26 +2,7 @@ package wire
 
 import (
 	"testing"
-
-	"github.com/otfabric/go-cotp"
 )
-
-func TestEncodeParseCOTPCR(t *testing.T) {
-	pdu, err := EncodeCOTPCR(0x0100, 0x0301)
-	if err != nil {
-		t.Fatalf("EncodeCOTPCR: %v", err)
-	}
-	dec, err := cotp.Decode(pdu)
-	if err != nil {
-		t.Fatalf("cotp.Decode: %v", err)
-	}
-	if dec.Type != cotp.TypeCR {
-		t.Fatalf("unexpected pdu type: %s", dec.Type)
-	}
-	if dec.CR == nil {
-		t.Fatal("expected CR non-nil")
-	}
-}
 
 func TestEncodeRackSlotTSAP(t *testing.T) {
 	// Classic S7: low byte = (rack<<5)|slot; rack 3 bits, slot 5 bits.

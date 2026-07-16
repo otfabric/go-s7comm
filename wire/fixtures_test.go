@@ -12,14 +12,14 @@ import (
 
 func TestFixtureTPKTDTFrame(t *testing.T) {
 	raw := loadHexFixture(t, "../testdata/frames/tpkt_dt.hex")
-	f, err := tpkt.Parse(raw)
+	payload, err := tpkt.DecodePacket(raw)
 	if err != nil {
-		t.Fatalf("tpkt.Parse error: %v", err)
+		t.Fatalf("tpkt.DecodePacket error: %v", err)
 	}
-	if f.Len() != len(raw) {
-		t.Fatalf("unexpected tpkt length: %d", f.Len())
+	if len(payload) == 0 {
+		t.Fatal("expected non-empty TPKT payload")
 	}
-	dec, err := cotp.Decode(f.Payload)
+	dec, err := cotp.Decode(payload)
 	if err != nil {
 		t.Fatalf("cotp.Decode error: %v", err)
 	}

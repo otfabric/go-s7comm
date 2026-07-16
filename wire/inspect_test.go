@@ -7,15 +7,22 @@ import (
 	"github.com/otfabric/go-tpkt"
 )
 
+func encodeInspectDTFrame(t *testing.T, s7 []byte) []byte {
+	t.Helper()
+	dt := &cotp.DT{EOT: true, UserData: s7}
+	dtBytes, err := dt.MarshalBinary()
+	if err != nil {
+		t.Fatalf("DT.MarshalBinary: %v", err)
+	}
+	frame, err := tpkt.EncodePacket(dtBytes)
+	if err != nil {
+		t.Fatalf("tpkt.EncodePacket: %v", err)
+	}
+	return frame
+}
+
 func TestInspectFrameTPKTOnly(t *testing.T) {
-	dtBytes, err := EncodeCOTPDT(nil)
-	if err != nil {
-		t.Fatalf("EncodeCOTPDT: %v", err)
-	}
-	frame, err := tpkt.Encode(dtBytes)
-	if err != nil {
-		t.Fatalf("tpkt.Encode: %v", err)
-	}
+	frame := encodeInspectDTFrame(t, nil)
 	s, err := InspectFrame(frame)
 	if err != nil {
 		t.Fatalf("InspectFrame error: %v", err)
@@ -31,14 +38,7 @@ func TestInspectFrameTPKTOnly(t *testing.T) {
 func TestInspectFrameWithS7(t *testing.T) {
 	s7 := EncodeS7Header(ROSCTRJob, 1, 1, 0)
 	s7 = append(s7, FuncReadVar)
-	dtBytes, err := EncodeCOTPDT(s7)
-	if err != nil {
-		t.Fatalf("EncodeCOTPDT: %v", err)
-	}
-	frame, err := tpkt.Encode(dtBytes)
-	if err != nil {
-		t.Fatalf("tpkt.Encode: %v", err)
-	}
+	frame := encodeInspectDTFrame(t, s7)
 	s, err := InspectFrame(frame)
 	if err != nil {
 		t.Fatalf("InspectFrame error: %v", err)
@@ -52,8 +52,9 @@ func TestInspectFrameWithS7(t *testing.T) {
 }
 
 func FuzzInspectFrame(f *testing.F) {
-	dtBytes, _ := EncodeCOTPDT(EncodeS7Header(ROSCTRJob, 1, 2, 0))
-	frame, _ := tpkt.Encode(dtBytes)
+	dt := &cotp.DT{EOT: true, UserData: EncodeS7Header(ROSCTRJob, 1, 2, 0)}
+	dtBytes, _ := dt.MarshalBinary()
+	frame, _ := tpkt.EncodePacket(dtBytes)
 	f.Add(frame)
 	f.Fuzz(func(t *testing.T, frame []byte) {
 		_, _ = InspectFrame(frame)

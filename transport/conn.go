@@ -1,157 +1,149 @@
-// Package transport provides TCP connection handling for S7 using go-tpkt for TPKT framing.
+// Package transport provides TCP+TP0 connection handling for S7 via go-cotp.
 //
-// SendContext and ReceiveContext set read/write deadlines from the context deadline and
-// the Conn's timeout; no per-I/O goroutine is used. Cancellation is effective when the
-// context has a deadline; otherwise I/O may run until the Conn timeout.
-//
-// SetTracer is not safe for concurrent use with ongoing Send/Receive; call it before
-// starting I/O or when the connection is idle.
+// Dial dials TCP and completes the Class 0 COTP handshake. The returned Conn
+// exposes TSDU Read/Write; TPKT framing and COTP DT segmentation are owned by
+// go-cotp. Callers must not use go-tpkt on the same stream.
 package transport
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
 	"time"
 
-	"github.com/otfabric/go-tpkt"
+	"github.com/otfabric/go-cotp"
 )
 
+// ErrConnectionNotEstablished is returned when an operation is attempted on a nil or closed Conn.
 var ErrConnectionNotEstablished = errors.New("connection not established")
 
-// Conn wraps a TCP connection with TPKT framing (go-tpkt) for S7/COTP payloads.
+// DefaultMaxTPDULength is the S7comm-style Class 0 TPDU size (wire 0xC0 = 0x0A).
+const DefaultMaxTPDULength = 1024
+
+// Config configures Dial (TCP + COTP Connect).
+type Config struct {
+	LocalTSAP     uint16
+	RemoteTSAP    uint16
+	Timeout       time.Duration // dial + handshake bound when > 0
+	MaxTPDULength int           // 0 → DefaultMaxTPDULength
+}
+
+// Conn is an established TP0 connection carrying S7 PDUs as TSDUs.
 type Conn struct {
-	conn    net.Conn
-	reader  *tpkt.Reader
-	writer  *tpkt.Writer
-	timeout time.Duration
-	tracer  Tracer
+	cotp *cotp.Conn
 }
 
-// Tracer is an interface for protocol tracing
-type Tracer interface {
-	Trace(direction string, data []byte)
-}
-
-// New creates a new S7 connection wrapper. Send accepts TPDU payload (e.g. COTP bytes);
-// Receive returns the TPDU payload of the next TPKT frame.
-func New(conn net.Conn, timeout time.Duration) *Conn {
-	return &Conn{
-		conn:    conn,
-		reader:  tpkt.NewReader(conn),
-		writer:  tpkt.NewWriter(conn),
-		timeout: timeout,
+// DialTCP dials a TCP connection. The caller owns raw until Connect is called.
+func DialTCP(ctx context.Context, address string, timeout time.Duration) (net.Conn, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	dialer := net.Dialer{Timeout: timeout}
+	raw, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("TCP connect: %w", err)
+	}
+	return raw, nil
 }
 
-// SetTracer sets a tracer for protocol debugging. Do not call concurrently with Send/Receive.
-func (c *Conn) SetTracer(t Tracer) {
-	c.tracer = t
+// Connect completes the TP0 handshake on an owned raw connection.
+// On failure go-cotp closes raw.
+func Connect(ctx context.Context, raw net.Conn, cfg Config) (*Conn, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	maxTPDU := cfg.MaxTPDULength
+	if maxTPDU == 0 {
+		maxTPDU = DefaultMaxTPDULength
+	}
+	connectCtx := ctx
+	var cancel context.CancelFunc
+	if cfg.Timeout > 0 {
+		connectCtx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		defer cancel()
+	}
+	c, err := cotp.Connect(connectCtx, raw, cotp.ClientConfig{
+		LocalSelector:  tsapSelector(cfg.LocalTSAP),
+		RemoteSelector: tsapSelector(cfg.RemoteTSAP),
+		MaxTPDULength:  maxTPDU,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Conn{cotp: c}, nil
 }
 
-// Send sends a TPDU payload as one TPKT frame (using go-tpkt).
-func (c *Conn) Send(data []byte) error {
-	return c.SendContext(context.Background(), data)
+// Dial dials TCP at address and runs Connect with the given TSAP selectors.
+// On any Connect failure the TCP connection is already closed by go-cotp.
+func Dial(ctx context.Context, address string, cfg Config) (*Conn, error) {
+	raw, err := DialTCP(ctx, address, cfg.Timeout)
+	if err != nil {
+		return nil, err
+	}
+	return Connect(ctx, raw, cfg)
 }
 
-// SendContext sends a TPDU payload as one TPKT frame. The write deadline is set from
-// ctx.Deadline() and the Conn timeout; no goroutine is spawned.
-func (c *Conn) SendContext(ctx context.Context, data []byte) error {
-	if c.conn == nil {
+// FromCOTP wraps an already-open *cotp.Conn (e.g. test Accept path).
+func FromCOTP(c *cotp.Conn) *Conn {
+	return &Conn{cotp: c}
+}
+
+func tsapSelector(tsap uint16) []byte {
+	return binary.BigEndian.AppendUint16(nil, tsap)
+}
+
+// WriteTSDU writes one complete S7 PDU as a COTP TSDU.
+func (c *Conn) WriteTSDU(ctx context.Context, s7PDU []byte) error {
+	if c == nil || c.cotp == nil {
 		return ErrConnectionNotEstablished
 	}
-	if err := setWriteDeadline(c.conn, c.timeout, ctx); err != nil {
-		return err
+	return c.cotp.WriteTSDU(ctx, s7PDU)
+}
+
+// ReadTSDU reads one complete S7 PDU (reassembled TSDU).
+func (c *Conn) ReadTSDU(ctx context.Context) ([]byte, error) {
+	if c == nil || c.cotp == nil {
+		return nil, ErrConnectionNotEstablished
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	return c.cotp.ReadTSDU(ctx)
+}
+
+// Close closes the TP0 connection.
+func (c *Conn) Close() error {
+	if c == nil || c.cotp == nil {
+		return nil
 	}
-	if c.tracer != nil {
-		c.tracer.Trace("TX", data)
+	err := c.cotp.Close()
+	c.cotp = nil
+	// go-cotp reports successful local close as ErrClosed; surface as nil to callers.
+	if errors.Is(err, cotp.ErrClosed) {
+		return nil
 	}
-	_, err := c.writer.WriteFrame(data)
 	return err
 }
 
-// Receive reads the next TPKT frame and returns its payload (e.g. COTP TPDU).
-func (c *Conn) Receive() ([]byte, error) {
-	return c.ReceiveContext(context.Background())
-}
-
-// ReceiveContext reads the next TPKT frame. The read deadline is set from ctx.Deadline()
-// and the Conn timeout; no goroutine is spawned.
-func (c *Conn) ReceiveContext(ctx context.Context) ([]byte, error) {
-	if c.conn == nil {
-		return nil, ErrConnectionNotEstablished
-	}
-	if err := setReadDeadline(c.conn, c.timeout, ctx); err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	payload, err := c.reader.ReadFrame()
-	if err != nil {
-		return nil, fmt.Errorf("read TPKT frame: %w", err)
-	}
-	if c.tracer != nil {
-		c.tracer.Trace("RX", payload)
-	}
-	return payload, nil
-}
-
-func setReadDeadline(conn net.Conn, timeout time.Duration, ctx context.Context) error {
-	deadline := time.Time{}
-	if timeout > 0 {
-		deadline = time.Now().Add(timeout)
-	}
-	if d, ok := ctx.Deadline(); ok {
-		if deadline.IsZero() || d.Before(deadline) {
-			deadline = d
-		}
-	}
-	return conn.SetReadDeadline(deadline)
-}
-
-func setWriteDeadline(conn net.Conn, timeout time.Duration, ctx context.Context) error {
-	deadline := time.Time{}
-	if timeout > 0 {
-		deadline = time.Now().Add(timeout)
-	}
-	if d, ok := ctx.Deadline(); ok {
-		if deadline.IsZero() || d.Before(deadline) {
-			deadline = d
-		}
-	}
-	return conn.SetWriteDeadline(deadline)
-}
-
-// Close closes the connection and nils internal fields so the Conn is in a clear terminal state.
-func (c *Conn) Close() error {
-	if c.conn != nil {
-		err := c.conn.Close()
-		c.conn = nil
-		c.reader = nil
-		c.writer = nil
-		return err
-	}
-	return nil
-}
-
-// LocalAddr returns the local network address
+// LocalAddr returns the local network address.
 func (c *Conn) LocalAddr() net.Addr {
-	if c.conn != nil {
-		return c.conn.LocalAddr()
+	if c == nil || c.cotp == nil {
+		return nil
 	}
-	return nil
+	return c.cotp.LocalAddr()
 }
 
-// RemoteAddr returns the remote network address
+// RemoteAddr returns the remote network address.
 func (c *Conn) RemoteAddr() net.Addr {
-	if c.conn != nil {
-		return c.conn.RemoteAddr()
+	if c == nil || c.cotp == nil {
+		return nil
 	}
-	return nil
+	return c.cotp.RemoteAddr()
+}
+
+// Negotiated returns COTP parameters after a successful handshake.
+func (c *Conn) Negotiated() cotp.NegotiatedParameters {
+	if c == nil || c.cotp == nil {
+		return cotp.NegotiatedParameters{}
+	}
+	return c.cotp.Negotiated()
 }

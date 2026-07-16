@@ -6,219 +6,206 @@ import (
 	"testing"
 	"time"
 
-	"github.com/otfabric/go-tpkt"
+	"github.com/otfabric/go-cotp"
 )
 
-func TestSendReceiveWithNetPipe(t *testing.T) {
+func openPipePair(t *testing.T) (client, server *Conn) {
+	t.Helper()
 	c1, c2 := net.Pipe()
-	defer func() { _ = c1.Close() }()
-	defer func() { _ = c2.Close() }()
-
-	conn := New(c1, 2*time.Second)
-
-	// Other end sends one TPKT frame (COTP DT minimal payload)
+	errCh := make(chan error, 1)
+	var srvCOTP *cotp.Conn
 	go func() {
-		payload := []byte{0x02, 0xF0, 0x80}
-		frame, _ := tpkt.Encode(payload)
-		_, _ = c2.Write(frame)
+		var err error
+		srvCOTP, err = cotp.Accept(context.Background(), c2, cotp.ServerConfig{MaxTPDULength: 1024})
+		errCh <- err
 	}()
-
-	payload, err := conn.Receive()
+	cli, err := Connect(context.Background(), c1, Config{
+		LocalTSAP:     0x0100,
+		RemoteTSAP:    0x0102,
+		MaxTPDULength: 1024,
+	})
 	if err != nil {
-		t.Fatalf("Receive error: %v", err)
+		t.Fatalf("Connect: %v", err)
 	}
-	// Receive returns TPKT payload only (COTP bytes)
-	if len(payload) != 3 {
-		t.Fatalf("expected payload len 3, got %d", len(payload))
+	if err := <-errCh; err != nil {
+		t.Fatalf("Accept: %v", err)
 	}
+	srv := FromCOTP(srvCOTP)
+	t.Cleanup(func() {
+		_ = cli.Close()
+		_ = srv.Close()
+	})
+	return cli, srv
 }
 
-func TestSendWithNetPipe(t *testing.T) {
-	c1, c2 := net.Pipe()
-	defer func() { _ = c1.Close() }()
-	defer func() { _ = c2.Close() }()
-
-	conn := New(c1, 2*time.Second)
-	payload := []byte{0x02, 0xF0, 0x80}
-	// Read on other end so Send doesn't block
-	done := make(chan []byte, 1)
-	go func() {
-		raw := make([]byte, 1024)
-		n, _ := c2.Read(raw)
-		done <- raw[:n]
-	}()
-	if err := conn.Send(payload); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	raw := <-done
-	if len(raw) < 7 {
-		t.Fatalf("expected TPKT frame, got %d bytes", len(raw))
-	}
-	decoded, err := tpkt.Decode(raw)
-	if err != nil {
-		t.Fatalf("tpkt.Decode: %v", err)
-	}
-	if len(decoded) != 3 || decoded[0] != 0x02 {
-		t.Fatalf("expected payload 0x02 0xF0 0x80, got %v", decoded)
-	}
-}
-
-func TestSendContext(t *testing.T) {
-	c1, c2 := net.Pipe()
-	defer func() { _ = c1.Close() }()
-	defer func() { _ = c2.Close() }()
-
-	go func() { _, _ = c2.Read(make([]byte, 64)) }() // drain so Send completes
-	conn := New(c1, 2*time.Second)
+func TestReadWriteTSDUWithNetPipe(t *testing.T) {
+	cli, srv := openPipePair(t)
 	ctx := context.Background()
-	// TPKT requires at least 3-byte payload (min packet length 7)
-	if err := conn.SendContext(ctx, []byte{0x01, 0x02, 0x03}); err != nil {
-		t.Fatalf("SendContext: %v", err)
+	want := []byte{0x32, 0x01, 0x00, 0x00}
+
+	errCh := make(chan error, 1)
+	var got []byte
+	go func() {
+		var err error
+		got, err = srv.ReadTSDU(ctx)
+		errCh <- err
+	}()
+	if err := cli.WriteTSDU(ctx, want); err != nil {
+		t.Fatalf("WriteTSDU: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("ReadTSDU: %v", err)
+	}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestWriteTSDUContextCancelled(t *testing.T) {
+	cli, _ := openPipePair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := cli.WriteTSDU(ctx, []byte{0x32, 0x01, 0x00, 0x00})
+	if err == nil {
+		t.Fatal("WriteTSDU with cancelled context should return error")
+	}
+}
+
+func TestReadTSDUContextCancelled(t *testing.T) {
+	cli, _ := openPipePair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := cli.ReadTSDU(ctx)
+	if err == nil {
+		t.Fatal("ReadTSDU with cancelled context should return error")
 	}
 }
 
 func TestCloseLocalAddrRemoteAddr(t *testing.T) {
-	c1, c2 := net.Pipe()
-	defer func() { _ = c2.Close() }()
-
-	conn := New(c1, time.Second)
-	if conn.LocalAddr() != nil {
-		t.Log("LocalAddr (pipe):", conn.LocalAddr())
+	cli, _ := openPipePair(t)
+	if cli.LocalAddr() != nil {
+		t.Log("LocalAddr (pipe):", cli.LocalAddr())
 	}
-	if conn.RemoteAddr() != nil {
-		t.Log("RemoteAddr (pipe):", conn.RemoteAddr())
+	if cli.RemoteAddr() != nil {
+		t.Log("RemoteAddr (pipe):", cli.RemoteAddr())
 	}
-	if err := conn.Close(); err != nil {
+	if err := cli.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	// Second close is no-op
-	_ = conn.Close()
+	_ = cli.Close()
 }
 
-func TestSetTracer(t *testing.T) {
-	c1, c2 := net.Pipe()
-	defer func() { _ = c1.Close() }()
-	defer func() { _ = c2.Close() }()
-
-	go func() { _, _ = c2.Read(make([]byte, 64)) }() // drain so Send completes
-	conn := New(c1, time.Second)
-	conn.SetTracer(nil)
-	var traced []string
-	conn.SetTracer(&tracerFunc{fn: func(d string, _ []byte) { traced = append(traced, d) }})
-	// TPKT requires at least 3-byte payload
-	if err := conn.Send([]byte{0x02, 0xF0, 0x80}); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if len(traced) < 1 || traced[0] != "TX" {
-		t.Fatalf("expected tracer TX, got %v", traced)
-	}
-}
-
-type tracerFunc struct {
-	fn func(direction string, data []byte)
-}
-
-func (t *tracerFunc) Trace(direction string, data []byte) {
-	if t.fn != nil {
-		t.fn(direction, data)
-	}
-}
-
-func TestSendContextCancelled(t *testing.T) {
-	c1, c2 := net.Pipe()
-	defer func() { _ = c1.Close() }()
-	defer func() { _ = c2.Close() }()
-
-	conn := New(c1, time.Second)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err := conn.SendContext(ctx, []byte{0x02, 0xF0, 0x80})
-	if err == nil {
-		t.Fatal("SendContext with cancelled context should return error")
-	}
-}
-
-func TestReceiveContextCancelled(t *testing.T) {
-	c1, c2 := net.Pipe()
-	defer func() { _ = c1.Close() }()
-	defer func() { _ = c2.Close() }()
-
-	conn := New(c1, time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := conn.ReceiveContext(ctx)
-	if err == nil {
-		t.Fatal("ReceiveContext with cancelled context should return error")
-	}
-}
-
-func TestConnWithRealTCP(t *testing.T) {
+func TestDialAndConnectTCP(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	defer func() { _ = ln.Close() }()
 
+	errCh := make(chan error, 1)
 	go func() {
-		conn, _ := ln.Accept()
-		if conn != nil {
-			_ = conn.Close()
+		conn, err := ln.Accept()
+		if err != nil {
+			errCh <- err
+			return
 		}
+		defer func() { _ = conn.Close() }()
+		srv, err := cotp.Accept(context.Background(), conn, cotp.ServerConfig{MaxTPDULength: 1024})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer func() { _ = srv.Close() }()
+		tsdu, err := srv.ReadTSDU(context.Background())
+		if err != nil {
+			errCh <- err
+			return
+		}
+		errCh <- srv.WriteTSDU(context.Background(), tsdu)
 	}()
 
-	client, err := net.Dial("tcp", ln.Addr().String())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cli, err := Dial(ctx, ln.Addr().String(), Config{
+		LocalTSAP:  0x0100,
+		RemoteTSAP: 0x0102,
+		Timeout:    time.Second,
+	})
 	if err != nil {
-		t.Fatalf("dial: %v", err)
+		t.Fatalf("Dial: %v", err)
 	}
-	tr := New(client, time.Second)
-	if tr.LocalAddr() == nil {
+	defer func() { _ = cli.Close() }()
+
+	if cli.LocalAddr() == nil {
 		t.Error("LocalAddr should be non-nil for TCP")
 	}
-	if tr.RemoteAddr() == nil {
+	if cli.RemoteAddr() == nil {
 		t.Error("RemoteAddr should be non-nil for TCP")
 	}
-	if err := tr.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+
+	want := []byte{0x32, 0x01, 0x00, 0x00, 0x00, 0x01}
+	if err := cli.WriteTSDU(ctx, want); err != nil {
+		t.Fatalf("WriteTSDU: %v", err)
+	}
+	got, err := cli.ReadTSDU(ctx)
+	if err != nil {
+		t.Fatalf("ReadTSDU: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("server: %v", err)
 	}
 }
 
-// BenchmarkSend measures Send throughput over a pipe (writer only; other end drains).
-func BenchmarkSend(b *testing.B) {
+func TestNilConnOperations(t *testing.T) {
+	var c *Conn
+	if err := c.WriteTSDU(context.Background(), []byte{1}); err != ErrConnectionNotEstablished {
+		t.Fatalf("WriteTSDU nil: got %v", err)
+	}
+	if _, err := c.ReadTSDU(context.Background()); err != ErrConnectionNotEstablished {
+		t.Fatalf("ReadTSDU nil: got %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close nil: %v", err)
+	}
+}
+
+// BenchmarkWriteTSDU measures WriteTSDU throughput over a pipe.
+func BenchmarkWriteTSDU(b *testing.B) {
 	c1, c2 := net.Pipe()
-	defer func() { _ = c1.Close() }()
-	defer func() { _ = c2.Close() }()
+	errCh := make(chan error, 1)
+	var srv *cotp.Conn
 	go func() {
-		buf := make([]byte, 1024)
+		var err error
+		srv, err = cotp.Accept(context.Background(), c2, cotp.ServerConfig{MaxTPDULength: 1024})
+		errCh <- err
+		if err != nil {
+			return
+		}
+		buf := make([]byte, 0)
+		_ = buf
 		for {
-			if _, err := c2.Read(buf); err != nil {
+			if _, err := srv.ReadTSDU(context.Background()); err != nil {
 				return
 			}
 		}
 	}()
-	conn := New(c1, 5*time.Second)
-	payload := []byte{0x02, 0xF0, 0x80}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = conn.Send(payload)
+	cli, err := Connect(context.Background(), c1, Config{MaxTPDULength: 1024})
+	if err != nil {
+		b.Fatalf("Connect: %v", err)
 	}
-}
+	if err := <-errCh; err != nil {
+		b.Fatalf("Accept: %v", err)
+	}
+	defer func() { _ = cli.Close() }()
+	defer func() { _ = srv.Close() }()
 
-// BenchmarkReceive measures Receive throughput over a pipe (reader only; other end writes).
-func BenchmarkReceive(b *testing.B) {
-	c1, c2 := net.Pipe()
-	defer func() { _ = c1.Close() }()
-	defer func() { _ = c2.Close() }()
-	frame, _ := tpkt.Encode([]byte{0x02, 0xF0, 0x80})
-	go func() {
-		for {
-			if _, err := c2.Write(frame); err != nil {
-				return
-			}
-		}
-	}()
-	conn := New(c1, 5*time.Second)
+	payload := []byte{0x32, 0x01, 0x00, 0x00}
+	ctx := context.Background()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = conn.Receive()
+		_ = cli.WriteTSDU(ctx, payload)
 	}
 }

@@ -20,19 +20,20 @@ type FrameSummary struct {
 }
 
 // InspectFrame decodes a full TPKT frame (go-tpkt) and COTP (go-cotp) and extracts high-level protocol metadata.
+// This is a diagnostic helper for offline captures; the live client path uses cotp.Conn TSDUs.
 func InspectFrame(frame []byte) (*FrameSummary, error) {
-	f, err := tpkt.Parse(frame)
+	payload, err := tpkt.DecodePacket(frame)
 	if err != nil {
 		return nil, fmt.Errorf("parse tpkt: %w", err)
 	}
 
-	dec, err := cotp.Decode(f.Payload)
+	dec, err := cotp.Decode(payload)
 	if err != nil {
 		return nil, fmt.Errorf("parse cotp: %w", err)
 	}
 
 	s := &FrameSummary{
-		TPKTLength: f.Len(),
+		TPKTLength: len(frame),
 		COTPType:   byte(dec.Type),
 	}
 
