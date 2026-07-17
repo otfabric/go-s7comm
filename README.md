@@ -12,7 +12,7 @@ A pure Go implementation of the Siemens S7 communication protocol. It builds on 
 The library provides:
 
 - S7 client connection setup (TCP + go-cotp TP0 + S7 setup communication)
-- Read/write operations for DB, inputs, outputs, and merkers (rich `ReadResult` with explicit status; CLI contract in [API.md](API.md))
+- Read/write operations for DB, inputs, outputs, and merkers (rich `ReadResult` with explicit status; CLI contract in [API.md](API.md)), plus native single-bit `ReadBit`/`WriteBit` (BIT transport, not byte RMW)
 - Readable range scan and compare-read across rack/slot candidates
 - Device discovery over CIDR ranges with rack/slot probing
 - SZL-based identification and diagnostics helpers
@@ -86,6 +86,16 @@ func main() {
 	}
 
 	fmt.Printf("DB1.DBB0..15 = % X\n", result.Data)
+
+	// Native BIT transport (not byte read-modify-write): DB1.DBX10.3
+	if err := c.WriteDBBit(ctx, 1, 10, 3, true); err != nil {
+		log.Fatal(err)
+	}
+	bit, err := c.ReadDBBit(ctx, 1, 10, 3)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("DB1.DBX10.3 = %v\n", bit)
 }
 ```
 
@@ -243,7 +253,7 @@ Black-box tests against both [snap7-interop](https://github.com/otfabric/snap7-i
 make interop
 ```
 
-This pulls pinned GHCR image digests, starts both containers per fixture, and runs `go test -tags=interop ./interop/...`. Unit `make check` does not include this suite.
+This pulls pinned GHCR image digests, starts both containers per fixture, and runs `go test -tags=interop ./interop/...`. `make check` typechecks the interop package (`-tags=interop` vet/lint + compile) but does not start Docker or run the matrix.
 
 | Variable | Purpose |
 | --- | --- |

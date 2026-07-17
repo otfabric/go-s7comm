@@ -168,6 +168,7 @@ type S7AnyAddress struct {
 
 // EncodeS7Any encodes an S7Any address specification (syntax SyntaxIDS7Any only).
 // Call ValidateArea(addr.Area) before encoding if area comes from untrusted input.
+// Byte-oriented: Start is a byte offset; Size is a byte count; transport size is BYTE.
 func EncodeS7Any(addr S7AnyAddress) []byte {
 	buf := make([]byte, 12)
 	buf[0] = 0x12 // Var spec
@@ -186,6 +187,68 @@ func EncodeS7Any(addr S7AnyAddress) []byte {
 	buf[11] = byte(startBit)
 
 	return buf
+}
+
+// S7AnyBitAddress is a single-bit S7ANY address. BitOffset must be 0..7 (caller validated).
+type S7AnyBitAddress struct {
+	Area       byte
+	DBNumber   int
+	ByteOffset int
+	BitOffset  int
+}
+
+// EncodeS7AnyBit encodes a one-bit S7ANY address (transport BIT, element count 1).
+// Start is ByteOffset*8+BitOffset (already in bits; not multiplied again).
+func EncodeS7AnyBit(addr S7AnyBitAddress) []byte {
+	buf := make([]byte, 12)
+	buf[0] = 0x12
+	buf[1] = 0x0A
+	buf[2] = SyntaxIDS7Any
+	buf[3] = TransportSizeBit
+	binary.BigEndian.PutUint16(buf[4:6], 1)
+	binary.BigEndian.PutUint16(buf[6:8], uint16(addr.DBNumber))
+	buf[8] = addr.Area
+	startBit := addr.ByteOffset*8 + addr.BitOffset
+	buf[9] = byte(startBit >> 16)
+	buf[10] = byte(startBit >> 8)
+	buf[11] = byte(startBit)
+	return buf
+}
+
+// EncodeReadVarBitRequest creates a Read Var request for one bit.
+func EncodeReadVarBitRequest(pduRef uint16, addr S7AnyBitAddress) []byte {
+	param := make([]byte, 2)
+	param[0] = FuncReadVar
+	param[1] = 1
+	param = append(param, EncodeS7AnyBit(addr)...)
+	header := EncodeS7Header(ROSCTRJob, pduRef, len(param), 0)
+	return append(header, param...)
+}
+
+// DataTransportSizeBit is the BIT transport size in Read/Write Var data sections (0x03).
+// Distinct from request S7ANY TransportSizeBit (0x01).
+const DataTransportSizeBit = 0x03
+
+// EncodeWriteVarBitRequest creates a Write Var request for one bit using native BIT data transport.
+// Data section: reserved 0x00, transport BIT (0x03), length 1 bit, payload 0x00/0x01.
+func EncodeWriteVarBitRequest(pduRef uint16, addr S7AnyBitAddress, value bool) []byte {
+	param := make([]byte, 2)
+	param[0] = FuncWriteVar
+	param[1] = 1
+	param = append(param, EncodeS7AnyBit(addr)...)
+
+	payload := byte(0)
+	if value {
+		payload = 1
+	}
+	data := []byte{0x00, DataTransportSizeBit, 0x00, 0x01, payload}
+	if len(data)%2 != 0 {
+		data = append(data, 0x00)
+	}
+
+	header := EncodeS7Header(ROSCTRJob, pduRef, len(param), len(data))
+	result := append(header, param...)
+	return append(result, data...)
 }
 
 // ReadVarRequestOverhead is the minimum PDU bytes for one read-var item: S7 header (10) + param (2) + S7Any (12).
@@ -388,6 +451,24 @@ func DecodeAsByte(item ReadVarItem) (byte, error) {
 		return 0, err
 	}
 	return data[0], nil
+}
+
+// DecodeAsBit interprets a successful one-bit Read Var item as a bool.
+// Requires return code success, data transport BIT (0x03), and a one-byte payload.
+// Any nonzero low bit is treated as true (Snap7-compatible).
+func DecodeAsBit(item ReadVarItem) (bool, error) {
+	if item.ReturnCode != RetCodeSuccess {
+		return false, &S7Error{Message: "item not success, cannot decode"}
+	}
+	if item.RawTransportSize != DataTransportSizeBit {
+		return false, &S7Error{Message: "expected BIT response transport size, got 0x" + hexByte(item.RawTransportSize)}
+	}
+	// Data-section BIT length is in bits.
+	byteLen := (int(item.RawLength) + 7) / 8
+	if byteLen != 1 || len(item.Data) < 1 {
+		return false, &S7Error{Message: fmt.Sprintf("bit response payload length invalid: normalized=%d data=%d", byteLen, len(item.Data))}
+	}
+	return item.Data[0]&0x01 != 0, nil
 }
 
 // DecodeAsWord returns the first 2 bytes as big-endian uint16.

@@ -328,6 +328,133 @@ func TestEncodeWriteVarRequest(t *testing.T) {
 	}
 }
 
+func TestEncodeS7AnyBit(t *testing.T) {
+	cases := []struct {
+		name      string
+		addr      S7AnyBitAddress
+		wantStart int
+		wantDB    uint16
+	}{
+		{"bit0", S7AnyBitAddress{Area: AreaDB, DBNumber: 1, ByteOffset: 0, BitOffset: 0}, 0, 1},
+		{"bit7", S7AnyBitAddress{Area: AreaDB, DBNumber: 1, ByteOffset: 0, BitOffset: 7}, 7, 1},
+		{"byte10_bit3", S7AnyBitAddress{Area: AreaDB, DBNumber: 5, ByteOffset: 10, BitOffset: 3}, 83, 5},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			b := EncodeS7AnyBit(tt.addr)
+			if len(b) != 12 {
+				t.Fatalf("len=%d, want 12", len(b))
+			}
+			if b[3] != TransportSizeBit {
+				t.Fatalf("transport=0x%02X, want BIT", b[3])
+			}
+			if b[4] != 0 || b[5] != 1 {
+				t.Fatalf("element count=%d, want 1", int(b[4])<<8|int(b[5]))
+			}
+			gotDB := uint16(b[6])<<8 | uint16(b[7])
+			if gotDB != tt.wantDB {
+				t.Fatalf("DB=%d, want %d", gotDB, tt.wantDB)
+			}
+			if b[8] != AreaDB {
+				t.Fatalf("area=0x%02X", b[8])
+			}
+			gotStart := int(b[9])<<16 | int(b[10])<<8 | int(b[11])
+			if gotStart != tt.wantStart {
+				t.Fatalf("start=%d, want %d", gotStart, tt.wantStart)
+			}
+		})
+	}
+}
+
+func TestEncodeReadVarBitRequest(t *testing.T) {
+	addr := S7AnyBitAddress{Area: AreaDB, DBNumber: 1, ByteOffset: 10, BitOffset: 3}
+	msg := EncodeReadVarBitRequest(7, addr)
+	if msg[10] != FuncReadVar {
+		t.Fatalf("function=0x%02X", msg[10])
+	}
+	if msg[11] != 1 {
+		t.Fatalf("item count=%d", msg[11])
+	}
+	spec := msg[12:24]
+	want := EncodeS7AnyBit(addr)
+	for i := range want {
+		if spec[i] != want[i] {
+			t.Fatalf("S7ANY mismatch at %d: got %v want %v", i, spec, want)
+		}
+	}
+}
+
+func TestEncodeWriteVarBitRequest(t *testing.T) {
+	addr := S7AnyBitAddress{Area: AreaDB, DBNumber: 1, ByteOffset: 0, BitOffset: 0}
+	for _, value := range []bool{false, true} {
+		msg := EncodeWriteVarBitRequest(1, addr, value)
+		if msg[10] != FuncWriteVar {
+			t.Fatalf("value=%v function=0x%02X", value, msg[10])
+		}
+		// data section starts after header(10)+param(2+12=14) = 24
+		data := msg[24:]
+		if len(data) < 5 {
+			t.Fatalf("value=%v data too short: %d", value, len(data))
+		}
+		if data[0] != 0x00 || data[1] != DataTransportSizeBit || data[2] != 0x00 || data[3] != 0x01 {
+			t.Fatalf("value=%v data header=%v", value, data[:4])
+		}
+		wantPayload := byte(0)
+		if value {
+			wantPayload = 1
+		}
+		if data[4] != wantPayload {
+			t.Fatalf("value=%v payload=0x%02X, want 0x%02X", value, data[4], wantPayload)
+		}
+		if len(data)%2 != 0 {
+			t.Fatalf("value=%v data len not even: %d", value, len(data))
+		}
+	}
+}
+
+func TestDecodeAsBit(t *testing.T) {
+	okFalse := ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: DataTransportSizeBit, RawLength: 1, Data: []byte{0x00}}
+	v, err := DecodeAsBit(okFalse)
+	if err != nil || v {
+		t.Fatalf("false: got %v err=%v", v, err)
+	}
+	okTrue := ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: DataTransportSizeBit, RawLength: 1, Data: []byte{0x01}}
+	v, err = DecodeAsBit(okTrue)
+	if err != nil || !v {
+		t.Fatalf("true: got %v err=%v", v, err)
+	}
+	okNonZero := ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: DataTransportSizeBit, RawLength: 1, Data: []byte{0x03}}
+	v, err = DecodeAsBit(okNonZero)
+	if err != nil || !v {
+		t.Fatalf("nonzero: got %v err=%v", v, err)
+	}
+	if _, err := DecodeAsBit(ReadVarItem{ReturnCode: RetCodeAddressFault, RawTransportSize: 0, RawLength: 0}); err == nil {
+		t.Fatal("expected error for rejected item")
+	}
+	if _, err := DecodeAsBit(ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: byte(RespTransportSizeByte), RawLength: 1, Data: []byte{0x01}}); err == nil {
+		t.Fatal("expected error for BYTE transport")
+	}
+	if _, err := DecodeAsBit(ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: byte(RespTransportSizeBit), RawLength: 1, Data: []byte{0x01}}); err == nil {
+		t.Fatal("expected error for request-style 0x01 transport in data section")
+	}
+	if _, err := DecodeAsBit(ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: DataTransportSizeBit, RawLength: 1, Data: nil}); err == nil {
+		t.Fatal("expected error for empty payload")
+	}
+}
+
+func TestParseReadVarResponse_BitItem(t *testing.T) {
+	param := []byte{FuncReadVar, 1}
+	data := []byte{RetCodeSuccess, DataTransportSizeBit, 0x00, 0x01, 0x01}
+	items, err := ParseReadVarResponse(param, data)
+	if err != nil {
+		t.Fatalf("ParseReadVarResponse: %v", err)
+	}
+	v, err := DecodeAsBit(items[0])
+	if err != nil || !v {
+		t.Fatalf("DecodeAsBit: %v %v", v, err)
+	}
+}
+
 func BenchmarkParseReadVarResponse(b *testing.B) {
 	param := []byte{FuncReadVar, 0x01}
 	data := []byte{RetCodeSuccess, 0x04, 0x00, 0x10, 0x12, 0x34, 0x56, 0x78}

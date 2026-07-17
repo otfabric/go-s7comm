@@ -57,6 +57,55 @@ func buildS7SetupResponse(pduRef uint16, pduSize int) []byte {
 	return resp
 }
 
+// buildReadVarBitResponse builds a successful one-bit Read Var response (BIT transport, length 1).
+func buildReadVarBitResponse(pduRef uint16, value byte) []byte {
+	paramLen, dataLen := 2, 6
+	resp := make([]byte, 12+paramLen+dataLen)
+	resp[0] = 0x32
+	resp[1] = byte(wire.ROSCTRAckData)
+	binary.BigEndian.PutUint16(resp[4:6], pduRef)
+	binary.BigEndian.PutUint16(resp[6:8], uint16(paramLen))
+	binary.BigEndian.PutUint16(resp[8:10], uint16(dataLen))
+	resp[12] = wire.FuncReadVar
+	resp[13] = 1
+	resp[14] = wire.RetCodeSuccess
+	resp[15] = wire.DataTransportSizeBit
+	binary.BigEndian.PutUint16(resp[16:18], 1)
+	resp[18] = value
+	return resp
+}
+
+// buildReadVarRejectedResponse builds a Read Var response with a non-success item return code.
+func buildReadVarRejectedResponse(pduRef uint16, retCode byte) []byte {
+	paramLen, dataLen := 2, 4
+	resp := make([]byte, 12+paramLen+dataLen)
+	resp[0] = 0x32
+	resp[1] = byte(wire.ROSCTRAckData)
+	binary.BigEndian.PutUint16(resp[4:6], pduRef)
+	binary.BigEndian.PutUint16(resp[6:8], uint16(paramLen))
+	binary.BigEndian.PutUint16(resp[8:10], uint16(dataLen))
+	resp[12] = wire.FuncReadVar
+	resp[13] = 1
+	resp[14] = retCode
+	resp[15] = 0x00
+	return resp
+}
+
+// buildWriteVarResponse builds a Write Var ack with the given item return code.
+func buildWriteVarResponse(pduRef uint16, retCode byte) []byte {
+	resp := make([]byte, 12+2+1)
+	resp[0] = 0x32
+	resp[1] = byte(wire.ROSCTRAckData)
+	binary.BigEndian.PutUint16(resp[4:6], pduRef)
+	binary.BigEndian.PutUint16(resp[6:8], 2)
+	resp[8] = 0
+	resp[9] = 1
+	resp[12] = wire.FuncWriteVar
+	resp[13] = 1
+	resp[14] = retCode
+	return resp
+}
+
 // buildReadVarResponse builds an S7 Read Var response (param 2 bytes, data 6 bytes for one item).
 // itemDataLenBits is the item length in bits (e.g. 16 for 2 bytes); dataBytes are the payload.
 func buildReadVarResponse(pduRef uint16, itemDataLenBits uint16, dataBytes []byte) []byte {

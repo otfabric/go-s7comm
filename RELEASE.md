@@ -1,5 +1,20 @@
 # go-s7comm Releases
 
+## v0.7.1
+
+**Date:** 2026-07-17
+**Previous release:** v0.7.0
+
+### Summary
+
+- **Native bit API**: Public `model.BitAddress` plus `client.ReadBit` / `WriteBit` / `ReadDBBit` / `WriteDBBit` using S7 BIT transport (not byte read-modify-write). Wire helpers: `S7AnyBitAddress`, `EncodeS7AnyBit`, `EncodeReadVarBitRequest`, `EncodeWriteVarBitRequest`, `DecodeAsBit`. Existing byte `EncodeS7Any` / ReadArea / WriteArea APIs unchanged. Interop `HasBit` steps use the public bit API.
+
+### Breaking changes
+
+- None (additive).
+
+---
+
 ## v0.7.0
 
 **Date:** 2026-07-17

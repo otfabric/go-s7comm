@@ -218,7 +218,7 @@ func bytesEqual(a, b []byte) bool {
 
 // TestUploadBlock_EmptyPayloadReturnsError: done=true with no payload returns "upload completed with no payload".
 func TestUploadBlock_EmptyPayloadReturnsError(t *testing.T) {
-	port, cleanup := startFakeUploadServer(t, [][]byte{[]byte{}}) // one chunk, empty data, done=true
+	port, cleanup := startFakeUploadServer(t, [][]byte{{}}) // one chunk, empty data, done=true
 	defer cleanup()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
