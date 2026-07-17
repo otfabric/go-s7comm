@@ -1,5 +1,20 @@
 # go-s7comm Releases
 
+## v0.7.2
+
+**Date:** 2026-07-18
+**Previous release:** v0.7.1
+
+### Summary
+
+- **wire**: Harden Read Var parsing for non-success items that declare a meaningful nonzero transport and payload. Snap7-style rejects with transport size `0x00` remain header-only (rawLength is preserved but not interpreted as payload length), so address-out-of-range replies keep surfacing as item return codes. Rejected items with a nonzero known/unknown transport and nonzero length strictly validate/skip the declared payload so multi-item responses stay aligned.
+
+### Breaking changes
+
+- None. Snap7 out-of-range / transport-`0x00` rejection handling is preserved; only rejected items with a meaningful declared payload become stricter.
+
+---
+
 ## v0.7.1
 
 **Date:** 2026-07-17

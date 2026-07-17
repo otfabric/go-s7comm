@@ -12,7 +12,7 @@ A pure Go implementation of the Siemens S7 communication protocol. It builds on 
 The library provides:
 
 - S7 client connection setup (TCP + go-cotp TP0 + S7 setup communication)
-- Read/write operations for DB, inputs, outputs, and merkers (rich `ReadResult` with explicit status; CLI contract in [API.md](API.md)), plus native single-bit `ReadBit`/`WriteBit` (BIT transport, not byte RMW)
+- Read/write operations for DB, inputs, outputs, and markers (rich `ReadResult` with explicit status; CLI contract in [API.md](API.md)), plus native single-bit `ReadBit`/`WriteBit` (BIT transport, not byte RMW)
 - Readable range scan and compare-read across rack/slot candidates
 - Device discovery over CIDR ranges with rack/slot probing
 - SZL-based identification and diagnostics helpers

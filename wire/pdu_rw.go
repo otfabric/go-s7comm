@@ -329,14 +329,29 @@ func decodeReadResponseItem(data []byte, offset int, isLastItem bool) (ReadVarIt
 	// Non-success items (e.g. Snap7 address fault) often use transport size 0x00 and no
 	// payload. Surface the return code without requiring a known transport size.
 	if retCode != RetCodeSuccess {
-		byteLen := 0
-		if n, err := NormalizeResponseDataLength(ResponseTransportSize(transportSize), rawLength); err == nil && n > 0 {
-			byteLen = n
-		}
 		next := offset + 4
-		if offset+4+byteLen <= len(data) {
-			next = offset + 4 + byteLen
-			if byteLen%2 != 0 && next < len(data) {
+		// Snap7-compatible rejection: transport size 0x00 means no payload.
+		// Preserve RawLength, but do not interpret it as payload length.
+		if transportSize == 0x00 {
+			return item, next, nil
+		}
+		if rawLength == 0 {
+			return item, next, nil
+		}
+		// Known/meaningful transport with nonzero length: strictly validate and skip payload.
+		byteLen, err := NormalizeResponseDataLength(ResponseTransportSize(transportSize), rawLength)
+		if err != nil {
+			return ReadVarItem{}, 0, err
+		}
+		if next+byteLen > len(data) {
+			return ReadVarItem{}, 0, fmt.Errorf("read response item at offset %d: %w", offset, ErrTruncatedItemPayload)
+		}
+		next += byteLen
+		if byteLen%2 != 0 {
+			if next >= len(data) && !isLastItem {
+				return ReadVarItem{}, 0, fmt.Errorf("read response item at offset %d: %w", offset, ErrTruncatedItemPayload)
+			}
+			if next < len(data) {
 				next++
 			}
 		}

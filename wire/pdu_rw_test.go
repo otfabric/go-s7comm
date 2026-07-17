@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 )
@@ -244,8 +245,83 @@ func TestParseReadVarResponse_NonSuccessZeroTransportSize(t *testing.T) {
 	if items[0].ReturnCode != RetCodeAddressFault {
 		t.Fatalf("ReturnCode=0x%02X, want address fault", items[0].ReturnCode)
 	}
+	if items[0].RawTransportSize != 0 || items[0].RawLength != 0 {
+		t.Fatalf("raw fields: transport=0x%02X length=%d", items[0].RawTransportSize, items[0].RawLength)
+	}
 	if len(items[0].Data) != 0 {
 		t.Fatalf("expected empty Data, got %v", items[0].Data)
+	}
+}
+
+func TestDecodeReadResponseItem_NonSuccessZeroTransportNonzeroLength(t *testing.T) {
+	// Real Snap7-compatible rejection: transport 0x00 means header-only even when
+	// rawLength is nonzero. Do not interpret rawLength as payload length.
+	data := []byte{RetCodeAddressFault, 0x00, 0x00, 0x10}
+	item, next, err := decodeReadResponseItem(data, 0, true)
+	if err != nil {
+		t.Fatalf("decodeReadResponseItem: %v", err)
+	}
+	if next != 4 {
+		t.Fatalf("next=%d, want 4 (header-only)", next)
+	}
+	if item.ReturnCode != RetCodeAddressFault {
+		t.Fatalf("ReturnCode=0x%02X, want address fault", item.ReturnCode)
+	}
+	if item.RawTransportSize != 0x00 {
+		t.Fatalf("RawTransportSize=0x%02X, want 0x00", item.RawTransportSize)
+	}
+	if item.RawLength != 0x10 {
+		t.Fatalf("RawLength=%d, want 0x10 (preserved, not consumed)", item.RawLength)
+	}
+	if len(item.Data) != 0 {
+		t.Fatalf("expected empty Data, got %v", item.Data)
+	}
+}
+
+func TestParseReadVarResponse_NonSuccessTruncatedPayload(t *testing.T) {
+	// Rejected item claims a known nonzero payload but buffer is short → hard error
+	// (avoids mis-aligning a following multi-item parse).
+	param := []byte{FuncReadVar, 0x01}
+	data := []byte{RetCodeAddressFault, byte(RespTransportSizeByte), 0x00, 0x10} // 16 bytes missing
+	_, err := ParseReadVarResponse(param, data)
+	if err == nil {
+		t.Fatal("expected truncated payload error")
+	}
+	if !errors.Is(err, ErrTruncatedItemPayload) {
+		t.Fatalf("expected ErrTruncatedItemPayload, got %v", err)
+	}
+}
+
+func TestParseReadVarResponse_NonSuccessUnknownTransportNonzeroLength(t *testing.T) {
+	// 0x00 is a Snap7 header-only rejection, not "unknown transport". Use a real unknown.
+	param := []byte{FuncReadVar, 0x01}
+	data := []byte{RetCodeAddressFault, 0xFE, 0x00, 0x08}
+	_, err := ParseReadVarResponse(param, data)
+	if err == nil {
+		t.Fatal("expected error for unknown transport with nonzero length")
+	}
+}
+
+func TestParseReadVarResponse_NonSuccessSkipsDeclaredPayload(t *testing.T) {
+	// Rejected item with a structurally valid payload still surfaces return code only;
+	// payload bytes are skipped for alignment of a following item.
+	param := []byte{FuncReadVar, 0x02}
+	data := []byte{
+		RetCodeAddressFault, 0x04, 0x00, 0x10, 0xAA, 0xBB, // skip 2 data bytes
+		RetCodeSuccess, 0x04, 0x00, 0x10, 0x11, 0x22,
+	}
+	items, err := ParseReadVarResponse(param, data)
+	if err != nil {
+		t.Fatalf("ParseReadVarResponse: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].ReturnCode != RetCodeAddressFault || len(items[0].Data) != 0 {
+		t.Fatalf("item0: code=0x%02X data=%v", items[0].ReturnCode, items[0].Data)
+	}
+	if items[1].ReturnCode != RetCodeSuccess || !bytes.Equal(items[1].Data, []byte{0x11, 0x22}) {
+		t.Fatalf("item1: code=0x%02X data=%v", items[1].ReturnCode, items[1].Data)
 	}
 }
 
