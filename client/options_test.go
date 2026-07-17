@@ -7,14 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/otfabric/go-cotp"
 	"github.com/otfabric/go-s7comm/model"
-	"github.com/otfabric/go-s7comm/transport"
-	"github.com/otfabric/go-s7comm/wire"
 )
 
 // startFakeSetupServer starts a TCP listener that accepts one connection and performs
-// COTP CC + S7 setup. pduSizeInResponse is the PDU size to return in the setup response (e.g. 480 or 960).
+// COTP Accept + S7 setup. pduSizeInResponse is the PDU size to return in the setup response (e.g. 480 or 960).
 // Returns the port and a cleanup function.
 func startFakeSetupServer(t *testing.T, pduSizeInResponse int) (port int, cleanup func()) {
 	t.Helper()
@@ -29,24 +26,14 @@ func startFakeSetupServer(t *testing.T, pduSizeInResponse int) (port int, cleanu
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		tr := transport.New(conn, 2*time.Second)
-		payload, _ := tr.Receive()
-		dec, _ := cotp.Decode(payload)
-		sendCOTPCC(tr, &dec)
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT != nil && len(dec.DT.UserData) >= 18 {
-			s7 := dec.DT.UserData
-			pduRef := binary.BigEndian.Uint16(s7[4:6])
-			resp := buildS7SetupResponse(pduRef, pduSizeInResponse)
-			dtBytes, _ := wire.EncodeCOTPDT(resp)
-			_ = tr.Send(dtBytes)
-		}
+		srv := acceptFakeCOTP(t, conn)
+		defer func() { _ = srv.Close() }()
+		serveFakeSetup(t, srv, pduSizeInResponse)
 	}()
 	return port, func() { _ = ln.Close() }
 }
 
-// startFakeSetupAndReadServer is like startFakeSetupServer but also responds to one Read Var request.
+// startFakeSetupAndReadServer is like startFakeSetupServer but also responds to Read Var requests.
 func startFakeSetupAndReadServer(t *testing.T, pduSizeInResponse int) (port int, cleanup func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -60,37 +47,22 @@ func startFakeSetupAndReadServer(t *testing.T, pduSizeInResponse int) (port int,
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		tr := transport.New(conn, 2*time.Second)
-		payload, _ := tr.Receive()
-		dec, _ := cotp.Decode(payload)
-		sendCOTPCC(tr, &dec)
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT != nil && len(dec.DT.UserData) >= 18 {
-			s7 := dec.DT.UserData
-			pduRef := binary.BigEndian.Uint16(s7[4:6])
-			resp := buildS7SetupResponse(pduRef, pduSizeInResponse)
-			dtBytes, _ := wire.EncodeCOTPDT(resp)
-			_ = tr.Send(dtBytes)
-		}
-		// Respond to each read request (for multi-chunk reads)
+		srv := acceptFakeCOTP(t, conn)
+		defer func() { _ = srv.Close() }()
+		serveFakeSetup(t, srv, pduSizeInResponse)
+		ctx := context.Background()
 		for {
-			payload, err := tr.Receive()
+			tsdu, err := srv.ReadTSDU(ctx)
 			if err != nil {
 				return
 			}
-			dec, _ := cotp.Decode(payload)
-			if dec.DT == nil || len(dec.DT.UserData) < 12 {
+			if len(tsdu) < 12 || tsdu[0] != 0x32 {
 				continue
 			}
-			s7 := dec.DT.UserData
-			if s7[0] != 0x32 || len(s7) < 12 {
-				continue
+			pduRef := binary.BigEndian.Uint16(tsdu[4:6])
+			if err := srv.WriteTSDU(ctx, buildReadVarResponse(pduRef, 16, []byte{0xAB, 0xCD})); err != nil {
+				return
 			}
-			pduRef := binary.BigEndian.Uint16(s7[4:6])
-			readResp := buildReadVarResponse(pduRef, 16, []byte{0xAB, 0xCD})
-			dtBytes, _ := wire.EncodeCOTPDT(readResp)
-			_ = tr.Send(dtBytes)
 		}
 	}()
 	return port, func() { _ = ln.Close() }
@@ -113,36 +85,22 @@ func startFakeSetupAndReadServerMultiAccept(t *testing.T, pduSizeInResponse int)
 			}
 			go func(c net.Conn) {
 				defer func() { _ = c.Close() }()
-				tr := transport.New(c, 2*time.Second)
-				payload, _ := tr.Receive()
-				dec, _ := cotp.Decode(payload)
-				sendCOTPCC(tr, &dec)
-				payload, _ = tr.Receive()
-				dec, _ = cotp.Decode(payload)
-				if dec.DT != nil && len(dec.DT.UserData) >= 18 {
-					s7 := dec.DT.UserData
-					pduRef := binary.BigEndian.Uint16(s7[4:6])
-					resp := buildS7SetupResponse(pduRef, pduSizeInResponse)
-					dtBytes, _ := wire.EncodeCOTPDT(resp)
-					_ = tr.Send(dtBytes)
-				}
+				srv := acceptFakeCOTP(t, c)
+				defer func() { _ = srv.Close() }()
+				serveFakeSetup(t, srv, pduSizeInResponse)
+				ctx := context.Background()
 				for {
-					payload, err := tr.Receive()
+					tsdu, err := srv.ReadTSDU(ctx)
 					if err != nil {
 						return
 					}
-					dec, _ := cotp.Decode(payload)
-					if dec.DT == nil || len(dec.DT.UserData) < 12 {
+					if len(tsdu) < 12 || tsdu[0] != 0x32 {
 						continue
 					}
-					s7 := dec.DT.UserData
-					if s7[0] != 0x32 || len(s7) < 12 {
-						continue
+					pduRef := binary.BigEndian.Uint16(tsdu[4:6])
+					if err := srv.WriteTSDU(ctx, buildReadVarResponse(pduRef, 16, []byte{0xAB, 0xCD})); err != nil {
+						return
 					}
-					pduRef := binary.BigEndian.Uint16(s7[4:6])
-					readResp := buildReadVarResponse(pduRef, 16, []byte{0xAB, 0xCD})
-					dtBytes, _ := wire.EncodeCOTPDT(readResp)
-					_ = tr.Send(dtBytes)
 				}
 			}(conn)
 		}

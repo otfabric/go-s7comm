@@ -10,7 +10,6 @@ import (
 
 	"github.com/otfabric/go-cotp"
 	"github.com/otfabric/go-s7comm/model"
-	"github.com/otfabric/go-s7comm/transport"
 	"github.com/otfabric/go-s7comm/wire"
 )
 
@@ -39,7 +38,7 @@ func (e *PDURefMismatchError) Error() string {
 type Client struct {
 	host          string
 	opts          options
-	conn          *transport.Conn
+	conn          *cotp.Conn
 	rack          int
 	slot          int
 	reqMu         sync.Mutex
@@ -143,10 +142,6 @@ func (c *Client) connectOnce(ctx context.Context, rack, slot int) error {
 
 	// Dial and handshake the new connection first; only swap into the client after success
 	// so a failed reconnect does not drop an existing healthy session.
-	conn, err := dialTransport(ctx, addr, timeout)
-	if err != nil {
-		return err
-	}
 	var local, remote uint16
 	if useExplicit {
 		local, remote = localTSAP, remoteTSAP
@@ -154,22 +149,20 @@ func (c *Client) connectOnce(ctx context.Context, rack, slot int) error {
 		var err error
 		local, err = wire.BuildTSAP(1, 0, 0)
 		if err != nil {
-			_ = conn.Close()
 			return &ValidationError{Message: err.Error()}
 		}
 		remote, err = wire.BuildTSAP(3, rack, slot)
 		if err != nil {
-			_ = conn.Close()
 			return &ValidationError{Message: err.Error()}
 		}
 	}
-	if err := performCOTPConnect(ctx, conn, local, remote); err != nil {
-		_ = conn.Close()
-		return fmt.Errorf("COTP connect: %w", err)
+	conn, err := dialCOTP(ctx, addr, timeout, local, remote)
+	if err != nil {
+		return err
 	}
 	setup, err := performS7Setup(ctx, conn, 1, maxAmqCalling, maxAmqCalled, maxPDU)
 	if err != nil {
-		_ = conn.Close()
+		_ = closeCOTP(conn)
 		return fmt.Errorf("S7 setup: %w", err)
 	}
 	c.mu.Lock()
@@ -181,9 +174,7 @@ func (c *Client) connectOnce(ctx context.Context, rack, slot int) error {
 	c.maxAmqCalling = setup.MaxAmqCalling
 	c.maxAmqCalled = setup.MaxAmqCalled
 	c.mu.Unlock()
-	if oldConn != nil {
-		_ = oldConn.Close()
-	}
+	_ = closeCOTP(oldConn)
 	return nil
 }
 
@@ -191,7 +182,7 @@ func (c *Client) closeConnLocked() error {
 	if c.conn == nil {
 		return nil
 	}
-	err := c.conn.Close()
+	err := closeCOTP(c.conn)
 	c.conn = nil
 	c.rack, c.slot = 0, 0
 	c.localTSAP, c.remoteTSAP = 0, 0
@@ -217,30 +208,17 @@ func (c *Client) sendReceive(ctx context.Context, req []byte, expectedPDURef uin
 	if pduSize > 0 && len(req) > pduSize {
 		return nil, nil, fmt.Errorf("request size %d exceeds negotiated PDU size %d: %w", len(req), pduSize, ErrRequestExceedsPDU)
 	}
-	dtBytes, err := wire.EncodeCOTPDT(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("encode COTP DT: %w", errors.Join(err, ErrProtocolFailure))
-	}
-	if err := conn.SendContext(ctx, dtBytes); err != nil {
+	if err := conn.WriteTSDU(ctx, req); err != nil {
 		return nil, nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
 
-	resp, err := conn.ReceiveContext(ctx)
+	s7Data, err := conn.ReadTSDU(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	dec, err := cotp.Decode(resp)
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode COTP: %w", errors.Join(err, ErrProtocolFailure))
-	}
-	if dec.DT == nil {
-		return nil, nil, fmt.Errorf("expected COTP DT, got %s: %w", dec.Type, ErrProtocolFailure)
-	}
-	s7Data := dec.DT.UserData
 
 	header, rest, err := wire.ParseS7Header(s7Data)
 	if err != nil {

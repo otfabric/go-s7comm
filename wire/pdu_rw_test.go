@@ -230,6 +230,25 @@ func TestResponseTransportSize_String(t *testing.T) {
 	}
 }
 
+func TestParseReadVarResponse_NonSuccessZeroTransportSize(t *testing.T) {
+	// Snap7-style rejected item: return code + transport 0x00 + length 0.
+	param := []byte{FuncReadVar, 0x01}
+	data := []byte{RetCodeAddressFault, 0x00, 0x00, 0x00}
+	items, err := ParseReadVarResponse(param, data)
+	if err != nil {
+		t.Fatalf("ParseReadVarResponse: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].ReturnCode != RetCodeAddressFault {
+		t.Fatalf("ReturnCode=0x%02X, want address fault", items[0].ReturnCode)
+	}
+	if len(items[0].Data) != 0 {
+		t.Fatalf("expected empty Data, got %v", items[0].Data)
+	}
+}
+
 func TestParseReadVarResponse_MixedItemReturnCodes(t *testing.T) {
 	// Two items: first success, second access fault. Header has no error; item-level return codes.
 	param := []byte{FuncReadVar, 0x02}

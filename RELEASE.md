@@ -1,5 +1,26 @@
 # go-s7comm Releases
 
+## v0.7.0
+
+**Date:** 2026-07-17
+**Previous release:** v0.6.3
+
+## Summary
+
+- **go-cotp TP0 service**: Live client paths use [go-cotp](https://github.com/otfabric/go-cotp) `v1.0.0-rc.1` (`cotp.Connect` / `ReadTSDU` / `WriteTSDU`). S7 PDUs are exchanged as complete TSDUs; TPKT framing and COTP CR/CC/DT segmentation are owned by go-cotp.
+- **Removed `transport` package**: Deleted the local TCP/TPKT wrapper. The client dials TCP and completes the TP0 handshake via go-cotp directly (dial helpers live in `client`).
+- **Dependencies**: Direct module dependency is `github.com/otfabric/go-cotp` only. `github.com/otfabric/go-tpkt` is transitive via go-cotp (no production or test imports of go-tpkt in this module).
+- **wire**: Replaced `InspectFrame` with `InspectTPDU` (COTP TPDU payload, no TPKT header). Removed obsolete COTP encode helpers from the wire surface/docs (`EncodeCOTPCR` / `EncodeCOTPDT`); COTP framing is owned by go-cotp. Non-success Read Var items with transport size `0x00` (Snap7 address faults) parse without error so callers see the item return code.
+- **Interop**: New `interop/` suite (`//go:build interop`) runs the full [snap7-interop](https://github.com/otfabric/snap7-interop) v0.1.0 canonical fixture matrix (15 fixtures) against both published servers (native Snap7 and pure-Python) on host ports 1102/2102, rack/slot 0/2. Vendored compiled fixtures under `interop/testdata/fixtures/`. `make interop` / CI workflow `.github/workflows/interop.yml` on every push and PR (pinned GHCR image digests).
+- **Docs**: README and API.md aligned with the TSDU-based stack, package layout (no `transport`), tables of contents, interop usage, and v0.7.0.
+
+## Breaking changes
+
+- Package `github.com/otfabric/go-s7comm/transport` removed. Use go-cotp directly for custom TP0 sessions; the high-level `client` package already does.
+- `wire.InspectFrame` replaced by `wire.InspectTPDU` (input is a COTP TPDU, not a full TPKT frame). `FrameSummary.TPKTLength` renamed to `TPDULength`.
+
+---
+
 ## v0.6.3
 
 **Date:** 2026-03-24

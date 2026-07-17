@@ -9,9 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/otfabric/go-cotp"
 	"github.com/otfabric/go-s7comm/model"
-	"github.com/otfabric/go-s7comm/transport"
 	"github.com/otfabric/go-s7comm/wire"
 )
 
@@ -75,46 +73,33 @@ func startFakeUploadServer(t *testing.T, chunks [][]byte) (port int, cleanup fun
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		tr := transport.New(conn, 2*time.Second)
-		payload, _ := tr.Receive()
-		dec, _ := cotp.Decode(payload)
-		sendCOTPCC(tr, &dec)
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT != nil && len(dec.DT.UserData) >= 18 {
-			s7 := dec.DT.UserData
-			pduRef := binary.BigEndian.Uint16(s7[4:6])
-			resp := buildS7SetupResponse(pduRef, 480)
-			dtBytes, _ := wire.EncodeCOTPDT(resp)
-			_ = tr.Send(dtBytes)
-		}
+		srv := acceptFakeCOTP(t, conn)
+		defer func() { _ = srv.Close() }()
+		serveFakeSetup(t, srv, 480)
+		ctx := context.Background()
 		// Start Upload
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT == nil || len(dec.DT.UserData) < 12 {
+		tsdu, err := srv.ReadTSDU(ctx)
+		if err != nil || len(tsdu) < 12 {
 			return
 		}
-		s7 := dec.DT.UserData
-		pduRef := binary.BigEndian.Uint16(s7[4:6])
-		startResp := buildStartUploadResponse(pduRef, "S1")
-		dtBytes, _ := wire.EncodeCOTPDT(startResp)
-		_ = tr.Send(dtBytes)
+		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
+		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, "S1")); err != nil {
+			return
+		}
 		// Upload chunks
 		for i, ch := range chunks {
-			payload, _ = tr.Receive()
-			dec, _ = cotp.Decode(payload)
-			if dec.DT == nil || len(dec.DT.UserData) < 12 {
+			tsdu, err = srv.ReadTSDU(ctx)
+			if err != nil || len(tsdu) < 12 {
 				return
 			}
-			s7 = dec.DT.UserData
-			pduRef = binary.BigEndian.Uint16(s7[4:6])
+			pduRef = binary.BigEndian.Uint16(tsdu[4:6])
 			done := i == len(chunks)-1
-			chunkResp := buildUploadChunkResponse(pduRef, ch, done)
-			dtBytes, _ = wire.EncodeCOTPDT(chunkResp)
-			_ = tr.Send(dtBytes)
+			if err := srv.WriteTSDU(ctx, buildUploadChunkResponse(pduRef, ch, done)); err != nil {
+				return
+			}
 		}
 		// End Upload (client sends; we may receive and ignore)
-		_, _ = tr.Receive()
+		_, _ = srv.ReadTSDU(ctx)
 	}()
 	return port, func() { _ = ln.Close() }
 }
@@ -178,26 +163,15 @@ func startFakeUploadServerBadStartResponse(t *testing.T) (port int, cleanup func
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		tr := transport.New(conn, 2*time.Second)
-		payload, _ := tr.Receive()
-		dec, _ := cotp.Decode(payload)
-		sendCOTPCC(tr, &dec)
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT != nil && len(dec.DT.UserData) >= 18 {
-			s7 := dec.DT.UserData
-			pduRef := binary.BigEndian.Uint16(s7[4:6])
-			resp := buildS7SetupResponse(pduRef, 480)
-			dtBytes, _ := wire.EncodeCOTPDT(resp)
-			_ = tr.Send(dtBytes)
-		}
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT == nil || len(dec.DT.UserData) < 12 {
+		srv := acceptFakeCOTP(t, conn)
+		defer func() { _ = srv.Close() }()
+		serveFakeSetup(t, srv, 480)
+		ctx := context.Background()
+		tsdu, err := srv.ReadTSDU(ctx)
+		if err != nil || len(tsdu) < 12 {
 			return
 		}
-		s7 := dec.DT.UserData
-		pduRef := binary.BigEndian.Uint16(s7[4:6])
+		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
 		// Respond with wrong function code so ParseStartUploadResponse fails
 		badParam := []byte{wire.FuncUpload, 0, 0, 0, 0, 0, 0, 0, 2, 'X', 'Y'}
 		header := make([]byte, 12)
@@ -206,9 +180,7 @@ func startFakeUploadServerBadStartResponse(t *testing.T) (port int, cleanup func
 		binary.BigEndian.PutUint16(header[4:6], pduRef)
 		binary.BigEndian.PutUint16(header[6:8], uint16(len(badParam)))
 		binary.BigEndian.PutUint16(header[8:10], 0)
-		startResp := append(header, badParam...)
-		dtBytes, _ := wire.EncodeCOTPDT(startResp)
-		_ = tr.Send(dtBytes)
+		_ = srv.WriteTSDU(ctx, append(header, badParam...))
 	}()
 	return port, func() { _ = ln.Close() }
 }
@@ -301,37 +273,24 @@ func startFakeUploadServerBadChunkResponse(t *testing.T) (port int, cleanup func
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		tr := transport.New(conn, 2*time.Second)
-		payload, _ := tr.Receive()
-		dec, _ := cotp.Decode(payload)
-		sendCOTPCC(tr, &dec)
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT != nil && len(dec.DT.UserData) >= 18 {
-			s7 := dec.DT.UserData
-			pduRef := binary.BigEndian.Uint16(s7[4:6])
-			resp := buildS7SetupResponse(pduRef, 480)
-			dtBytes, _ := wire.EncodeCOTPDT(resp)
-			_ = tr.Send(dtBytes)
-		}
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT == nil || len(dec.DT.UserData) < 12 {
+		srv := acceptFakeCOTP(t, conn)
+		defer func() { _ = srv.Close() }()
+		serveFakeSetup(t, srv, 480)
+		ctx := context.Background()
+		tsdu, err := srv.ReadTSDU(ctx)
+		if err != nil || len(tsdu) < 12 {
 			return
 		}
-		s7 := dec.DT.UserData
-		pduRef := binary.BigEndian.Uint16(s7[4:6])
-		startResp := buildStartUploadResponse(pduRef, "S1")
-		dtBytes, _ := wire.EncodeCOTPDT(startResp)
-		_ = tr.Send(dtBytes)
+		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
+		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, "S1")); err != nil {
+			return
+		}
 		// First chunk request: respond with wrong function code so ParseUploadResponse fails
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT == nil || len(dec.DT.UserData) < 12 {
+		tsdu, err = srv.ReadTSDU(ctx)
+		if err != nil || len(tsdu) < 12 {
 			return
 		}
-		s7 = dec.DT.UserData
-		pduRef = binary.BigEndian.Uint16(s7[4:6])
+		pduRef = binary.BigEndian.Uint16(tsdu[4:6])
 		badParam := []byte{0x00, 0x00} // wrong function, not wire.FuncUpload
 		header := make([]byte, 12)
 		header[0] = 0x32
@@ -339,9 +298,7 @@ func startFakeUploadServerBadChunkResponse(t *testing.T) (port int, cleanup func
 		binary.BigEndian.PutUint16(header[4:6], pduRef)
 		binary.BigEndian.PutUint16(header[6:8], uint16(len(badParam)))
 		binary.BigEndian.PutUint16(header[8:10], 0)
-		badResp := append(header, badParam...)
-		dtBytes, _ = wire.EncodeCOTPDT(badResp)
-		_ = tr.Send(dtBytes)
+		_ = srv.WriteTSDU(ctx, append(header, badParam...))
 	}()
 	return port, func() { _ = ln.Close() }
 }
@@ -383,44 +340,37 @@ func startFakeUploadServerCloseAfterLastChunk(t *testing.T, chunks [][]byte) (po
 		if err != nil {
 			return
 		}
-		tr := transport.New(conn, 2*time.Second)
-		payload, _ := tr.Receive()
-		dec, _ := cotp.Decode(payload)
-		sendCOTPCC(tr, &dec)
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT != nil && len(dec.DT.UserData) >= 18 {
-			s7 := dec.DT.UserData
-			pduRef := binary.BigEndian.Uint16(s7[4:6])
-			resp := buildS7SetupResponse(pduRef, 480)
-			dtBytes, _ := wire.EncodeCOTPDT(resp)
-			_ = tr.Send(dtBytes)
-		}
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT == nil || len(dec.DT.UserData) < 12 {
+		srv := acceptFakeCOTP(t, conn)
+		serveFakeSetup(t, srv, 480)
+		ctx := context.Background()
+		tsdu, err := srv.ReadTSDU(ctx)
+		if err != nil || len(tsdu) < 12 {
+			_ = srv.Close()
 			_ = conn.Close()
 			return
 		}
-		s7 := dec.DT.UserData
-		pduRef := binary.BigEndian.Uint16(s7[4:6])
-		startResp := buildStartUploadResponse(pduRef, "S1")
-		dtBytes, _ := wire.EncodeCOTPDT(startResp)
-		_ = tr.Send(dtBytes)
+		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
+		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, "S1")); err != nil {
+			_ = srv.Close()
+			_ = conn.Close()
+			return
+		}
 		for i, ch := range chunks {
-			payload, _ = tr.Receive()
-			dec, _ = cotp.Decode(payload)
-			if dec.DT == nil || len(dec.DT.UserData) < 12 {
+			tsdu, err = srv.ReadTSDU(ctx)
+			if err != nil || len(tsdu) < 12 {
+				_ = srv.Close()
 				_ = conn.Close()
 				return
 			}
-			s7 = dec.DT.UserData
-			pduRef = binary.BigEndian.Uint16(s7[4:6])
+			pduRef = binary.BigEndian.Uint16(tsdu[4:6])
 			done := i == len(chunks)-1
-			chunkResp := buildUploadChunkResponse(pduRef, ch, done)
-			dtBytes, _ = wire.EncodeCOTPDT(chunkResp)
-			_ = tr.Send(dtBytes)
+			if err := srv.WriteTSDU(ctx, buildUploadChunkResponse(pduRef, ch, done)); err != nil {
+				_ = srv.Close()
+				_ = conn.Close()
+				return
+			}
 			if done {
+				_ = srv.Close()
 				_ = conn.Close() // close before client sends EndUpload; cleanup will fail
 				return
 			}
@@ -465,31 +415,20 @@ func startFakeUploadServerHangOnFirstChunk(t *testing.T) (port int, cleanup func
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		tr := transport.New(conn, 2*time.Second)
-		payload, _ := tr.Receive()
-		dec, _ := cotp.Decode(payload)
-		sendCOTPCC(tr, &dec)
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT != nil && len(dec.DT.UserData) >= 18 {
-			s7 := dec.DT.UserData
-			pduRef := binary.BigEndian.Uint16(s7[4:6])
-			resp := buildS7SetupResponse(pduRef, 480)
-			dtBytes, _ := wire.EncodeCOTPDT(resp)
-			_ = tr.Send(dtBytes)
-		}
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT == nil || len(dec.DT.UserData) < 12 {
+		srv := acceptFakeCOTP(t, conn)
+		defer func() { _ = srv.Close() }()
+		serveFakeSetup(t, srv, 480)
+		ctx := context.Background()
+		tsdu, err := srv.ReadTSDU(ctx)
+		if err != nil || len(tsdu) < 12 {
 			return
 		}
-		s7 := dec.DT.UserData
-		pduRef := binary.BigEndian.Uint16(s7[4:6])
-		startResp := buildStartUploadResponse(pduRef, "S1")
-		dtBytes, _ := wire.EncodeCOTPDT(startResp)
-		_ = tr.Send(dtBytes)
+		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
+		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, "S1")); err != nil {
+			return
+		}
 		// Receive first chunk request but never respond (client will timeout / context deadline)
-		_, _ = tr.Receive()
+		_, _ = srv.ReadTSDU(ctx)
 		// hang: do not send response
 	}()
 	return port, func() { _ = ln.Close() }

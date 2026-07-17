@@ -4,12 +4,11 @@ import (
 	"fmt"
 
 	"github.com/otfabric/go-cotp"
-	"github.com/otfabric/go-tpkt"
 )
 
-// FrameSummary captures key protocol fields from one S7-over-TPKT frame.
+// FrameSummary captures key protocol fields from one COTP TPDU that may carry an S7 PDU.
 type FrameSummary struct {
-	TPKTLength  int
+	TPDULength  int
 	COTPType    byte
 	ROSCTR      byte
 	Function    byte
@@ -19,20 +18,17 @@ type FrameSummary struct {
 	ErrorCode   byte
 }
 
-// InspectFrame decodes a full TPKT frame (go-tpkt) and COTP (go-cotp) and extracts high-level protocol metadata.
-func InspectFrame(frame []byte) (*FrameSummary, error) {
-	f, err := tpkt.Parse(frame)
-	if err != nil {
-		return nil, fmt.Errorf("parse tpkt: %w", err)
-	}
-
-	dec, err := cotp.Decode(f.Payload)
+// InspectTPDU decodes a COTP TPDU payload (no TPKT header) and extracts high-level S7 metadata when present.
+// This is a diagnostic helper for offline captures; the live client path uses cotp.Conn TSDUs.
+// For full TPKT captures, peel the TPKT header with go-tpkt first, then pass the TPDU payload here.
+func InspectTPDU(tpdu []byte) (*FrameSummary, error) {
+	dec, err := cotp.Decode(tpdu)
 	if err != nil {
 		return nil, fmt.Errorf("parse cotp: %w", err)
 	}
 
 	s := &FrameSummary{
-		TPKTLength: f.Len(),
+		TPDULength: len(tpdu),
 		COTPType:   byte(dec.Type),
 	}
 

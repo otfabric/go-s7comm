@@ -256,6 +256,30 @@ func decodeReadResponseItem(data []byte, offset int, isLastItem bool) (ReadVarIt
 	transportSize := data[offset+1]
 	rawLength := binary.BigEndian.Uint16(data[offset+2 : offset+4])
 
+	item := ReadVarItem{
+		ReturnCode:       retCode,
+		RawTransportSize: transportSize,
+		RawLength:        rawLength,
+		Data:             nil,
+	}
+
+	// Non-success items (e.g. Snap7 address fault) often use transport size 0x00 and no
+	// payload. Surface the return code without requiring a known transport size.
+	if retCode != RetCodeSuccess {
+		byteLen := 0
+		if n, err := NormalizeResponseDataLength(ResponseTransportSize(transportSize), rawLength); err == nil && n > 0 {
+			byteLen = n
+		}
+		next := offset + 4
+		if offset+4+byteLen <= len(data) {
+			next = offset + 4 + byteLen
+			if byteLen%2 != 0 && next < len(data) {
+				next++
+			}
+		}
+		return item, next, nil
+	}
+
 	byteLen, err := NormalizeResponseDataLength(ResponseTransportSize(transportSize), rawLength)
 	if err != nil {
 		return ReadVarItem{}, 0, err
@@ -267,15 +291,7 @@ func decodeReadResponseItem(data []byte, offset int, isLastItem bool) (ReadVarIt
 		return ReadVarItem{}, 0, fmt.Errorf("read response item at offset %d: %w", offset, ErrTruncatedItemPayload)
 	}
 
-	item := ReadVarItem{
-		ReturnCode:       retCode,
-		RawTransportSize: transportSize,
-		RawLength:        rawLength,
-		Data:             nil,
-	}
-	if retCode == RetCodeSuccess {
-		item.Data = data[offset+4 : offset+4+byteLen]
-	}
+	item.Data = data[offset+4 : offset+4+byteLen]
 	next := offset + 4 + byteLen
 	// Consume fill byte for 16-bit alignment before next item (classic S7 multi-item response).
 	if byteLen%2 != 0 {

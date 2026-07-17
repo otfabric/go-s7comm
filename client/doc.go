@@ -24,7 +24,7 @@
 //   - rejected: target returned an S7 error/return code.
 //   - timeout: context or network timeout.
 //   - transport-error: connection or send/receive failure.
-//   - protocol-error: TPKT/COTP/S7 parse or length error.
+//   - protocol-error: COTP/S7 parse or length error.
 //   - inconclusive: repeated reads gave mixed results (e.g. range probe).
 //
 // # Probe statuses (rack/slot probing)

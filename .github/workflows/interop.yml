@@ -1,0 +1,48 @@
+name: Interop
+run-name: "Interop (${{ github.event_name }}) on ${{ github.ref_name }} by @${{ github.actor }}"
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  snap7-interop:
+    name: snap7-interop (native + python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
+      - name: Run interop matrix
+        env:
+          SNAP_INTEROP_NATIVE_IMAGE: ghcr.io/otfabric/snap-interop-native@sha256:d630d021d58f52445c0e19d5ec19d58cf19f4316ca05ba2d8afeca8cb419a1db
+          SNAP_INTEROP_PYTHON_IMAGE: ghcr.io/otfabric/snap-interop-python@sha256:11baf7133f9d5ae6c282c159aa7dd4fdf2ed7be55784719514ad43a19a73b85d
+        run: make interop
+
+      - name: Collect container logs on failure
+        if: failure()
+        run: |
+          mkdir -p artifacts
+          docker ps -a > artifacts/docker-ps.txt || true
+          for c in $(docker ps -aq --filter name=go-s7comm-interop); do
+            docker logs "$c" > "artifacts/${c}.log" 2>&1 || true
+          done
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interop-logs
+          path: artifacts/
+          if-no-files-found: ignore

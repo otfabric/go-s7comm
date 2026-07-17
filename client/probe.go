@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/otfabric/go-cotp"
-	"github.com/otfabric/go-s7comm/transport"
 	"github.com/otfabric/go-s7comm/wire"
 )
 
@@ -346,28 +345,16 @@ func applyProbeDefaults(req *RackSlotProbeRequest) {
 
 // runFollowUp sends a benign S7 request (SZL) on the existing conn and returns whether it succeeded.
 // pduRef is used for the request header. On success, confirmedBy is set to the strategy that worked.
-func runFollowUp(ctx context.Context, conn *transport.Conn, pduRef uint16, strategy ConfirmationKind) (ok bool, confirmedBy ConfirmationKind, errMsg string) {
+func runFollowUp(ctx context.Context, conn *cotp.Conn, pduRef uint16, strategy ConfirmationKind) (ok bool, confirmedBy ConfirmationKind, errMsg string) {
 	trySZL := func(szlID uint16) (bool, string) {
 		req := wire.EncodeSZLRequest(pduRef, szlID, 0)
-		dtBytes, err := wire.EncodeCOTPDT(req)
+		if err := conn.WriteTSDU(ctx, req); err != nil {
+			return false, err.Error()
+		}
+		s7Data, err := conn.ReadTSDU(ctx)
 		if err != nil {
 			return false, err.Error()
 		}
-		if err := conn.SendContext(ctx, dtBytes); err != nil {
-			return false, err.Error()
-		}
-		resp, err := conn.ReceiveContext(ctx)
-		if err != nil {
-			return false, err.Error()
-		}
-		dec, err := cotp.Decode(resp)
-		if err != nil {
-			return false, err.Error()
-		}
-		if dec.DT == nil {
-			return false, "expected COTP DT"
-		}
-		s7Data := dec.DT.UserData
 		hdr, rest, err := wire.ParseS7Header(s7Data)
 		if err != nil {
 			return false, err.Error()
@@ -422,18 +409,6 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 	c := RackSlotCandidate{Rack: rack, Slot: slot, Confidence: ConfidenceNone}
 
 	addr := net.JoinHostPort(req.Address, fmt.Sprint(req.Port))
-	conn, err := dialTransport(ctx, addr, req.Timeout)
-	if err != nil {
-		c.Stage = ProbeStageTCP
-		if isProbeTimeout(err) {
-			c.Status = StatusTimeout
-		} else {
-			c.Status = StatusUnreachable
-		}
-		c.Error = err.Error()
-		return c
-	}
-	defer func() { _ = conn.Close() }()
 
 	var localTSAP, remoteTSAP uint16
 	if req.LocalTSAP != nil {
@@ -461,7 +436,19 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 	c.LocalTSAP = localTSAP
 	c.RemoteTSAP = remoteTSAP
 
-	if err := performCOTPConnect(ctx, conn, localTSAP, remoteTSAP); err != nil {
+	raw, err := dialTCP(ctx, addr, req.Timeout)
+	if err != nil {
+		c.Stage = ProbeStageTCP
+		if isProbeTimeout(err) {
+			c.Status = StatusTimeout
+		} else {
+			c.Status = StatusUnreachable
+		}
+		c.Error = err.Error()
+		return c
+	}
+	conn, err := connectCOTP(ctx, raw, req.Timeout, localTSAP, remoteTSAP)
+	if err != nil {
 		c.Stage = ProbeStageCOTP
 		if isProbeTimeout(err) {
 			c.Status = StatusTimeout
@@ -471,6 +458,7 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 		c.Error = err.Error()
 		return c
 	}
+	defer func() { _ = closeCOTP(conn) }()
 	setupRef := uint16(1)
 	setup, err := performS7Setup(ctx, conn, setupRef, 1, 1, 480)
 	if err != nil {

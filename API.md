@@ -1,13 +1,41 @@
 # API Reference: otfabric/go-s7comm
 
 This document describes the public API exposed by the module and gives practical behavior notes.
+Current release: **v0.7.0** (see [RELEASE.md](RELEASE.md)).
+
+## Table of contents
+
+- [Packages](#packages)
+- [client](#client)
+  - [Construction and lifecycle](#construction-and-lifecycle)
+  - [Read result model](#read-result-model)
+  - [Read/write API](#readwrite-api)
+  - [Range scan API](#range-scan-api)
+  - [Compare read API](#compare-read-api)
+  - [Discovery API](#discovery-api)
+  - [Rack/Slot Probe API](#rackslot-probe-api)
+  - [Identification, diagnostics, and blocks](#identification-diagnostics-and-blocks)
+  - [Client options](#client-options)
+- [model](#model)
+  - [Addressing and enums](#addressing-and-enums)
+  - [Blocks and device metadata](#blocks-and-device-metadata)
+  - [Value encoders/decoders](#value-encodersdecoders)
+- [wire](#wire)
+  - [Transport stack (go-cotp)](#transport-stack-go-cotp)
+  - [TSAP helpers](#tsap-helpers)
+  - [S7 headers](#s7-headers)
+  - [PDUs](#pdus)
+  - [Inspection and errors](#inspection-and-errors)
+  - [Diagnostic helpers](#diagnostic-helpers)
 
 ## Packages
 
-- **client** — High-level PLC operations (connect, read/write, range scan, compare read, discovery, rack/slot probe, SZL, blocks)
+- **client** — High-level PLC operations (connect, read/write, range scan, compare read, discovery, rack/slot probe, SZL, blocks). Uses [go-cotp](https://github.com/otfabric/go-cotp) TP0 service (`Connect` / `ReadTSDU` / `WriteTSDU`); TPKT is owned by go-cotp via go-tpkt.
 - **model** — Domain data types, areas, value encoders/decoders, device and fingerprint structures
-- **transport** — TCP connection wrapper with TPKT framing (go-tpkt); Send/Receive on TPDU payloads
-- **wire** — S7 PDU encoding/parsing and COTP helpers (go-cotp)
+- **wire** — S7 PDU encoding/parsing and S7 TSAP helpers (does not own TPKT or COTP framing)
+- **interop** — Not a library API. Build-tagged test package (`go test -tags=interop ./interop/...`) for snap7-interop dual-server black-box tests
+
+There is no `transport` package. Live I/O uses go-cotp; go-tpkt is only a transitive dependency of go-cotp.
 
 ## client
 
@@ -27,9 +55,10 @@ func (c *Client) PDUSize() int
 
 Behavior notes:
 
-- Connect performs TCP dial, COTP setup, and S7 setup communication.
+- Connect performs TCP dial, go-cotp TP0 handshake (`cotp.Connect` with two-byte big-endian TSAP selectors), and S7 setup communication. S7 PDUs are exchanged as complete TSDUs (`WriteTSDU` / `ReadTSDU`). Default COTP `MaxTPDULength` offer is 1024.
 - A second Connect() on an already-connected client only replaces the session after the new handshake succeeds; a failed reconnect leaves the existing session intact.
-- On setup failure, connection state is closed and cleared.
+- On setup failure of a new dial, that connection is closed; a prior healthy session is left intact until a successful swap.
+- Close maps a successful local go-cotp close (`cotp.ErrClosed`) to a nil error.
 - Invalid caller input (port, timeout, max PDU, rack/slot) returns `*ValidationError`.
 - Request methods are serialized internally for protocol safety.
 
@@ -58,22 +87,29 @@ type ReadResult struct {
     Data            []byte
     Warnings        []string
     Message         string // human-readable; descriptive, not stable API
-    Cause           error  // optional; for errors.Is/Unwrap
+    Cause           error  // optional; for errors.Is/Unwrap; Status is more stable than Cause
     ItemStatus      string
     ReturnCode      byte
 }
 
-func (r *ReadResult) OK() bool     // true if Status == ReadStatusSuccess
+func (r *ReadResult) OK() bool      // true if Status == ReadStatusSuccess
 func (r *ReadResult) Success() bool // same as OK(); prefer res.Err() for flow
-func (r *ReadResult) Err() error   // non-nil when Status is not success; returns ErrNilReadResult when r is nil
+func (r *ReadResult) Err() error    // non-nil when Status is not success; returns ErrNilReadResult when r is nil
 
-var ErrNilReadResult      = errors.New("read result is nil")  // returned by ReadResult.Err() when receiver is nil
-var ErrNotConnected       = errors.New("not connected")       // stable: methods requiring a session may return or wrap this
-var ErrRequestExceedsPDU  = errors.New("request exceeds negotiated PDU size")  // stable
-var ErrProtocolFailure    = errors.New("protocol failure")    // advanced/diagnostic: malformed protocol; handshake and request path wrap it
+func ClassifyReadOutcome(requested, returned int) ReadStatus
 
-type ValidationError struct { Message string }  // stable: caller-input validation; use errors.As(err, &ValidationError{}) to detect
-type PDURefMismatchError struct { Expected, Got uint16 }     // stable: response correlation; use errors.As(err, *PDURefMismatchError)
+type ReadOutcomeError struct {
+    Result *ReadResult
+    // implements error; Unwrap() exposes Cause when set
+}
+
+var ErrNilReadResult     = errors.New("read result is nil")
+var ErrNotConnected      = errors.New("not connected")
+var ErrRequestExceedsPDU = errors.New("request exceeds negotiated PDU size")
+var ErrProtocolFailure   = errors.New("protocol failure") // advanced/diagnostic; handshake and request path wrap it
+
+type ValidationError struct{ Message string }                         // use errors.As(err, &ValidationError{})
+type PDURefMismatchError struct{ Expected, Got uint16 }               // use errors.As(err, &PDURefMismatchError{})
 ```
 
 **CLI contract (for s7commctl and other consumers):** To avoid ambiguity, CLIs should define:
@@ -100,10 +136,11 @@ func (c *Client) ReadMerkers(ctx context.Context, offset, size int) (*ReadResult
 Behavior notes:
 
 - Read methods return `*ReadResult` and a connection/setup `error`. Use `result.OK()` for success; `result.Err()` for a non-success read outcome; `result.Data` for the payload. Empty or short reads are never reported as success.
-- ReadArea chunks requests based on negotiated PDU size. Status is derived from requested vs returned length (success, short-read, empty-read) or from S7 return codes (rejected).
-- WriteArea writes `len(data)` bytes; `addr.Size` is ignored. Uses WriteVar with optional rate limiting. Invalid address returns `*ValidationError`.
+- ReadArea chunks requests based on negotiated PDU size. Status is derived from requested vs returned length (success, short-read, empty-read) or from S7 item return codes (rejected). Non-success Read Var items with transport size `0x00` (common for Snap7 address faults) are surfaced as rejected with `ReturnCode` set, not as a protocol parse failure.
+- WriteArea writes `len(data)` bytes; `addr.Size` is ignored. Large payloads are chunked. Uses WriteVar with optional rate limiting. Invalid address returns `*ValidationError`.
+- There are no public bit-level ReadBit/WriteBit helpers; addresses are byte-oriented (`model.Address.Start` / `Size`).
 
-### Range scan API (Phase 2)
+### Range scan API
 
 Scan an area to discover readable byte ranges. The client must be connected for non-empty ranges.
 
@@ -113,7 +150,7 @@ type RangeProbeRequest struct {
     DBNumber    int
     Start       int
     End         int
-    Step        int           // if 0, use ProbeSize
+    Step        int // if 0, use ProbeSize
     ProbeSize   int
     Retries     int
     RetryDelay  time.Duration
@@ -159,7 +196,7 @@ func (c *Client) ProbeReadableRanges(ctx context.Context, req RangeProbeRequest)
 
 Behavior: For each offset in [Start, End) by Step, performs a read of ProbeSize bytes (one probe per offset). Adjacent probes with the same status are merged into spans. Summary aggregates spans by readable/empty/failed/inconclusive. Optional Repeat and Interval set Stable/AllZero; Retries with mixed outcomes yield Inconclusive. Read-only.
 
-### Compare read API (Phase 3)
+### Compare read API
 
 Perform the same read across multiple rack/slot candidates; detect if the endpoint responds identically (rack/slot-insensitive).
 
@@ -170,15 +207,15 @@ type RackSlot struct {
 }
 
 type CompareReadRequest struct {
-    Address      string
-    Port         int
-    Candidates   []RackSlot
-    Area         model.Area
-    DBNumber     int
-    Offset       int
-    Size         int
-    Timeout      time.Duration
-    Parallelism  int  // concurrent connections; 0 or negative = 1 (sequential); results in candidate order
+    Address     string
+    Port        int
+    Candidates  []RackSlot
+    Area        model.Area
+    DBNumber    int
+    Offset      int
+    Size        int
+    Timeout     time.Duration
+    Parallelism int // concurrent connections; 0 or negative = 1 (sequential); results in candidate order
 }
 
 type CompareReadCandidate struct {
@@ -202,15 +239,15 @@ Behavior: For each candidate, creates a client, connects with that rack/slot, pe
 
 ```go
 type DiscoverResult struct {
-    IP               string
-    Port             int
-    IsS7             bool
-    Rack             int
-    Slot             int
-    PDUSize          int
-    TSAP             string
-    Error            string
-    AbandonedReason  string // e.g. "max_attempts", "context_canceled" when host was not found
+    IP              string
+    Port            int
+    IsS7            bool
+    Rack            int
+    Slot            int
+    PDUSize         int
+    TSAP            string
+    Error           string
+    AbandonedReason string // e.g. "max_attempts", "context_canceled" when host was not found
 }
 
 func Discover(ctx context.Context, cidr string, opts ...DiscoverOption) ([]DiscoverResult, error)
@@ -229,6 +266,8 @@ Default discovery settings:
 - parallel workers: 10
 - rack range: 0..3
 - slot range: 0..5
+
+CIDR expansion is capped (host-bit limit); oversized ranges return `*ValidationError`.
 
 ### Rack/Slot Probe API
 
@@ -257,15 +296,15 @@ const (
 type ProbeStatus string
 
 const (
-    StatusUnreachable   ProbeStatus = "unreachable"
-    StatusTCPOnly       ProbeStatus = "tcp-only"
-    StatusCOTPOnly      ProbeStatus = "cotp-only"
-    StatusSetupOnly     ProbeStatus = "setup-only"
-    StatusValidConnect  ProbeStatus = "valid-connect"
-    StatusValidQuery    ProbeStatus = "valid-query"
-    StatusRejected      ProbeStatus = "rejected"
-    StatusTimeout       ProbeStatus = "timeout"
-    StatusFlaky         ProbeStatus = "flaky"
+    StatusUnreachable  ProbeStatus = "unreachable"
+    StatusTCPOnly      ProbeStatus = "tcp-only"
+    StatusCOTPOnly     ProbeStatus = "cotp-only"
+    StatusSetupOnly    ProbeStatus = "setup-only"
+    StatusValidConnect ProbeStatus = "valid-connect"
+    StatusValidQuery   ProbeStatus = "valid-query"
+    StatusRejected     ProbeStatus = "rejected"
+    StatusTimeout      ProbeStatus = "timeout"
+    StatusFlaky        ProbeStatus = "flaky"
 )
 
 type ConfirmationKind string
@@ -300,40 +339,40 @@ type RackSlotProbeRequest struct {
     LocalTSAP  *uint16
     RemoteTSAP *uint16
 
-    SafetyMode         SafetyMode      // affects default Timeout, Parallelism, DelayMS
-    JitterMS            int            // random [0, JitterMS] ms before each attempt; 0 = no jitter
-    MaxAttemptsPerHost  int            // cap (rack,slot) attempts per host; 0 = no limit
+    SafetyMode         SafetyMode
+    JitterMS           int
+    MaxAttemptsPerHost int
 
-    Strict  bool            // if true, only valid-query counts as valid; run follow-up
-    Confirm ConfirmationKind // when Strict: szl | cpu-state | any (default when Strict: any)
-    Retries int             // reserved for Phase 2
-    RetryDelay time.Duration
+    Strict               bool
+    Confirm              ConfirmationKind // when Strict: szl | cpu-state | any (default when Strict: any)
+    Retries              int              // reserved
+    RetryDelay           time.Duration
     StopOnFirstConfirmed bool
 }
 
 type RackSlotCandidate struct {
-    Rack         int
-    Slot         int
-    LocalTSAP    uint16
-    RemoteTSAP   uint16
-    Stage        ProbeStage
-    Status       ProbeStatus
-    PDUSize      int
-    ConfirmedBy  ConfirmationKind
-    Confidence   Confidence
-    Error        string
+    Rack        int
+    Slot        int
+    LocalTSAP   uint16
+    RemoteTSAP  uint16
+    Stage       ProbeStage
+    Status      ProbeStatus
+    PDUSize     int
+    ConfirmedBy ConfirmationKind
+    Confidence  Confidence
+    Error       string
 }
 
 type RackSlotProbeResult struct {
     Address          string
     Candidates       []RackSlotCandidate
     Valid            []RackSlotCandidate
-    SetupAccepted    int    // candidates that reached setup success
-    ConfirmedByQuery int    // candidates with valid-query
-    Flaky            int    // reserved for Phase 2
+    SetupAccepted    int
+    ConfirmedByQuery int
+    Flaky            int
     TCPOnly          int
-    StoppedEarly     bool   // true when stopped due to MaxAttemptsPerHost before all candidates tried
-    StoppedReason    string // e.g. "max_attempts_reached"
+    StoppedEarly     bool
+    StoppedReason    string
 }
 
 func ProbeRackSlots(ctx context.Context, req RackSlotProbeRequest) (*RackSlotProbeResult, error)
@@ -342,17 +381,17 @@ func DefaultRackSlotProbeRequest(address string) RackSlotProbeRequest
 
 Status values:
 
-| Status           | Meaning                                                |
-|------------------|--------------------------------------------------------|
-| `valid-query`    | S7 setup and follow-up query both succeeded            |
-| `valid-connect`  | S7 setup succeeded; follow-up failed or not attempted |
-| `setup-only`     | S7 setup succeeded; no follow-up (non-strict only)     |
-| `cotp-only`      | COTP ok, S7 setup failed                                |
-| `tcp-only`       | TCP ok, COTP failed                                    |
-| `unreachable`    | TCP connect failed                                     |
-| `rejected`       | Target rejected (S7 error)                             |
-| `timeout`        | Any stage timed out                                     |
-| `flaky`          | Retries produced mixed results                          |
+| Status | Meaning |
+| --- | --- |
+| `valid-query` | S7 setup and follow-up query both succeeded |
+| `valid-connect` | S7 setup succeeded; follow-up failed or not attempted |
+| `setup-only` | S7 setup succeeded; no follow-up (non-strict only) |
+| `cotp-only` | COTP ok, S7 setup failed |
+| `tcp-only` | TCP ok, COTP failed |
+| `unreachable` | TCP connect failed |
+| `rejected` | Target rejected (S7 error) |
+| `timeout` | Any stage timed out |
+| `flaky` | Retries produced mixed results |
 
 Confirmation strategies (when `Strict` is true):
 
@@ -363,8 +402,8 @@ Confirmation strategies (when `Strict` is true):
 Behavior notes:
 
 - **Valid list**: without `Strict`, `Valid` contains candidates with status `setup-only`, `valid-connect`, or `valid-query`. With `Strict`, `Valid` contains only `valid-query`.
-- When `Strict` is true and `Confirm` is zero, `Confirm` is set to `ConfirmAny` in `applyProbeDefaults`.
-- Remote TSAP is derived from rack/slot (PG convention: `0x03RS`) unless `RemoteTSAP` is set.
+- When `Strict` is true and `Confirm` is zero, `Confirm` is set to `ConfirmAny`.
+- Remote TSAP is derived from rack/slot (PG / S7Basic convention via `wire.BuildTSAP`) unless `RemoteTSAP` is set.
 - Probe is non-destructive: only connection, setup, and read-only follow-up traffic.
 
 ### Identification, diagnostics, and blocks
@@ -373,8 +412,8 @@ Behavior notes:
 func (c *Client) Identify(ctx context.Context) (*model.DeviceInfo, error)
 func (c *Client) GetCPUState(ctx context.Context) (model.CPUState, error)
 func (c *Client) GetProtectionLevel(ctx context.Context) (model.ProtectionLevel, error)
-func (c *Client) ReadDiagBuffer(ctx context.Context) (*model.DiagBuffer, error)   // partial parsing; 20-byte stride
-func (c *Client) ReadDiagBufferRaw(ctx context.Context) ([]byte, error)          // raw SZL 0x00A0 payload
+func (c *Client) ReadDiagBuffer(ctx context.Context) (*model.DiagBuffer, error) // partial parsing; 20-byte stride
+func (c *Client) ReadDiagBufferRaw(ctx context.Context) ([]byte, error)        // raw SZL 0x00A0 payload
 
 func (c *Client) ListBlocks(ctx context.Context, bt model.BlockType) ([]model.BlockInfo, error)
 func (c *Client) ListAllBlocks(ctx context.Context) ([]model.BlockInfo, error)
@@ -412,6 +451,9 @@ Defaults:
 - rack/slot: 0/1
 - timeout: 5s
 - max PDU request: 480
+- max AMQ calling/called: 1
+
+`WithTSAP` selects explicit local/remote TSAPs (skips rack/slot packing). `WithAutoRackSlot` tries common rack/slot pairs (or a brute range when `brute` is true).
 
 ## model
 
@@ -437,11 +479,13 @@ func (a Area) String() string
 
 type Address struct {
     Area     Area
-    DBNumber int
-    Start    int
-    Size     int
+    DBNumber int // only for DB
+    Start    int // byte offset
+    Size     int // byte count
 }
 ```
+
+Additional classic area codes used by the wire layer (`wire.AreaDI`, `wire.AreaPeripheral`, S7-200 IEC areas, etc.) are validated via `wire.ValidateArea`; the high-level `model.Area` set above is what client helpers typically use.
 
 ### Blocks and device metadata
 
@@ -455,11 +499,25 @@ func (l BlockLang) String() string
 type BlockInfo struct { ... }
 type BlockData struct { ... }
 
-type DeviceInfo struct { ... }
-type ConnectionInfo struct { ... }
+type DeviceInfo struct {
+    OrderNumber, SerialNumber, ModuleName, PlantID, Copyright string
+    ModuleType, FWVersion, HWVersion, CPUType, CPUFamily      string
+}
+
+type ConnectionInfo struct {
+    Host          string
+    Port          int
+    LocalTSAP     uint16
+    RemoteTSAP    uint16
+    Rack          int
+    Slot          int
+    PDUSize       int // negotiated max S7 PDU payload (bytes), excluding TPKT/COTP
+    MaxAmqCalling int
+    MaxAmqCalled  int
+}
 
 type CPUState uint8
-func (s CPUState) String() string
+func (s CPUState) String() string // RUN, STOP, STARTUP, HOLD, UNKNOWN
 
 type ProtectionLevel uint8
 func (p ProtectionLevel) String() string
@@ -495,39 +553,10 @@ func EncodeString(val string, maxLen int) []byte
 
 Notes:
 
+- Implemented via `model/codec` and re-exported from `model`.
 - Numeric values are big-endian.
 - DecodeBool returns false for invalid/negative indexes.
 - EncodeString uses S7 string layout and clamps total length to [2, 256].
-
-## transport
-
-Transport uses **github.com/otfabric/go-tpkt** for TPKT framing: `Send` writes the given TPDU payload as one TPKT frame; `Receive` reads the next TPKT frame and returns its payload.
-
-**Invariant:** `Receive()` returns exactly one TPKT payload. In the S7 connection and data flow this payload is always one complete COTP TPDU (e.g. CC, DT). Callers never receive raw S7 bytes directly; S7 payload is carried inside COTP DT `UserData` and must be extracted via `cotp.Decode` and `dec.DT.UserData`.
-
-```go
-import "github.com/otfabric/go-s7comm/transport"
-```
-
-```go
-var ErrConnectionNotEstablished = errors.New("connection not established")
-
-type Conn struct { ... }
-
-type Tracer interface {
-    Trace(direction string, data []byte)
-}
-
-func New(conn net.Conn, timeout time.Duration) *Conn
-func (c *Conn) SetTracer(t Tracer)
-func (c *Conn) Send(data []byte) error       // payload = TPDU (e.g. COTP); TPKT framing applied internally
-func (c *Conn) SendContext(ctx context.Context, data []byte) error
-func (c *Conn) Receive() ([]byte, error)    // returns TPKT payload (e.g. COTP bytes)
-func (c *Conn) ReceiveContext(ctx context.Context) ([]byte, error)
-func (c *Conn) Close() error
-func (c *Conn) LocalAddr() net.Addr
-func (c *Conn) RemoteAddr() net.Addr
-```
 
 ## wire
 
@@ -535,24 +564,20 @@ func (c *Conn) RemoteAddr() net.Addr
 import "github.com/otfabric/go-s7comm/wire"
 ```
 
-### TPKT and COTP
+### Transport stack (go-cotp)
 
-TPKT framing is provided by **github.com/otfabric/go-tpkt**: the transport layer sends and receives TPDU payloads as TPKT frames. COTP encoding uses **github.com/otfabric/go-cotp** (import path `github.com/otfabric/go-cotp`); the wire package exposes S7-oriented helpers:
+Live connections use **github.com/otfabric/go-cotp** TP0 service (`v1.0.0-rc.1`+). The client dials TCP, calls `cotp.Connect` with opaque TSAP selectors, then exchanges complete S7 PDUs as TSDUs. TPKT framing and COTP CR/CC/DT segmentation are owned by go-cotp (which depends on go-tpkt). This module does not expose a local transport package and does not import go-tpkt in production or test code.
+
+### TSAP helpers
 
 ```go
-func BuildTSAP(connType, rack, slot int) uint16
-func EncodeCOTPCR(localTSAP, remoteTSAP uint16) ([]byte, error)
-func EncodeCOTPDT(s7Payload []byte) ([]byte, error)
+func EncodeRackSlotTSAP(rack, slot byte) byte
+func ValidateRackSlot(rack, slot int) error
+func BuildTSAP(connType, rack, slot int) (uint16, error)
 ```
 
-**Ownership and usage:**
-
-- These functions return **COTP payload only** (one complete COTP TPDU). The caller must send that payload with `transport.Send(...)`; the transport layer adds TPKT framing. **Do not** wrap the returned bytes in TPKT again when using this transport—doing so would double-frame and break the protocol.
-- `BuildTSAP`: S7 TSAP from connection type (1=PG, 2=OP, 3=S7Basic), rack, slot.
-- `EncodeCOTPCR`: COTP Connection Request for the given TSAPs. Send the returned bytes via `transport.Send`.
-- `EncodeCOTPDT`: COTP Data TPDU with EOT and the given S7 payload. Send the returned bytes via `transport.Send`.
-
-Decoding of received payloads is done via `cotp.Decode(payload)` from go-cotp (e.g. check `dec.Type`, `dec.CC`, `dec.DT.UserData`).
+- `BuildTSAP`: S7 TSAP from connection type (1=PG, 2=OP, 3=S7Basic), rack (0..7), slot (0..31). Returns `error` when rack/slot are out of range.
+- Selectors passed to go-cotp are the two-byte big-endian encoding of these TSAP values.
 
 ### S7 headers
 
@@ -574,12 +599,14 @@ func EncodeReadVarRequest(pduRef uint16, addrs []S7AnyAddress) []byte
 func ParseReadVarResponse(param, data []byte) ([]ReadVarItem, error)
 func EncodeWriteVarRequest(pduRef uint16, addr S7AnyAddress, value []byte) []byte
 func ParseWriteVarResponse(param, data []byte) error
+func NormalizeResponseDataLength(transportSize ResponseTransportSize, rawLength uint16) (int, error)
 
 func EncodeSZLRequest(pduRef, szlID, szlIndex uint16) []byte
 func ParseSZLResponse(data []byte) (*SZLResponse, error)
 
 func EncodeBlockListRequest(pduRef uint16, blockType byte) []byte
 func ParseBlockListResponse(szlData []byte) ([]BlockListEntry, error)
+func ParseBlockInfoResponse(szlData []byte) (BlockInfoData, error)
 func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) []byte
 func ParseStartUploadResponse(param []byte) (string, error)
 func EncodeUploadRequest(pduRef uint16, sessionID string) []byte
@@ -587,13 +614,52 @@ func EncodeEndUploadRequest(pduRef uint16, sessionID string) []byte
 func ParseUploadResponse(param, data []byte) (*UploadChunk, error)
 ```
 
+`EncodeS7Any` / read-write helpers use byte transport size and byte offsets (bit address = `Start*8`). Only `SyntaxIDS7Any` is supported for encoding (`ValidateRequestSyntax`).
+
 ### Inspection and errors
 
 ```go
-func InspectFrame(frame []byte) (*FrameSummary, error)
+type FrameSummary struct {
+    TPDULength  int
+    COTPType    byte
+    ROSCTR      byte
+    Function    byte
+    ParamLength int
+    DataLength  int
+    ErrorClass  byte
+    ErrorCode   byte
+}
+
+func InspectTPDU(tpdu []byte) (*FrameSummary, error)
+
+type S7Error struct {
+    Class   byte
+    Code    byte
+    Message string
+}
 
 func NewS7Error(class, code byte) *S7Error
+func NewS7ErrorWithParam(class, code byte, param []byte) *S7Error
 func ReturnCodeError(code byte) error
+func ParamErrorFromParam(param []byte) (code uint16, ok bool)
+func ParamErrorCodeString(code uint16) string
 ```
 
-Key sentinel errors include short/invalid S7 headers and payload length mismatches. TPKT and COTP errors come from go-tpkt and go-cotp when used for framing and decode.
+`InspectTPDU` decodes a COTP TPDU payload (no TPKT header) and, when the TPDU carries DT user data starting with an S7 header, fills S7 summary fields. For full TPKT captures, peel the TPKT header with go-tpkt first.
+
+Key sentinel errors include short/invalid S7 headers and payload length mismatches (`ErrShortS7Header`, `ErrInvalidS7ProtocolID`, `ErrS7PayloadLength`, …). COTP codec/service errors come from go-cotp.
+
+### Diagnostic helpers
+
+```go
+func FunctionCodeString(code byte) string
+func AreaString(area byte) string
+func SyntaxIDString(syntax byte) string
+func ErrClassString(class byte) string
+func ItemReturnCodeString(code byte) string
+func HeaderErrorString(class, code byte) string
+func SZLIDString(id uint16) string
+func ValidateArea(area byte) error
+func ValidateRequestSyntax(syntax byte) error
+func (r ResponseTransportSize) String() string
+```

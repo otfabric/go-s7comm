@@ -6,15 +6,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/otfabric/go-s7comm/transport"
+	"github.com/otfabric/go-cotp"
 )
 
 func TestCloseClearsConnection(t *testing.T) {
-	left, right := net.Pipe()
-	defer func() { _ = right.Close() }()
+	c1, c2 := net.Pipe()
+	errCh := make(chan error, 1)
+	var srv *cotp.Conn
+	go func() {
+		var err error
+		srv, err = cotp.Accept(context.Background(), c2, cotp.ServerConfig{MaxTPDULength: 1024})
+		errCh <- err
+	}()
+	cli, err := cotp.Connect(context.Background(), c1, cotp.ClientConfig{MaxTPDULength: 1024})
+	if err != nil {
+		t.Fatalf("cotp.Connect: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("cotp.Accept: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
 
 	c := New("127.0.0.1")
-	c.conn = transport.New(left, time.Second)
+	c.conn = cli
 
 	if err := c.Close(); err != nil {
 		t.Fatalf("close failed: %v", err)

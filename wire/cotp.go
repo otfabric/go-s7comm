@@ -1,10 +1,7 @@
 package wire
 
 import (
-	"encoding/binary"
 	"fmt"
-
-	"github.com/otfabric/go-cotp"
 )
 
 // EncodeRackSlotTSAP returns the low byte of a classic S7 TSAP for rack/slot.
@@ -33,28 +30,4 @@ func BuildTSAP(connType, rack, slot int) (uint16, error) {
 	}
 	low := EncodeRackSlotTSAP(byte(rack), byte(slot))
 	return uint16(connType)<<8 | uint16(low), nil
-}
-
-// EncodeCOTPCR builds a COTP Connection Request TPDU for the given local/remote TSAPs (go-cotp).
-func EncodeCOTPCR(localTSAP, remoteTSAP uint16) ([]byte, error) {
-	tpduSize := uint8(0x0A) // 1024 bytes
-	cr := &cotp.CR{
-		CDT:             0,
-		DestinationRef:  0,
-		SourceRef:       0,
-		ClassOption:     0,
-		CallingSelector: binary.BigEndian.AppendUint16(nil, localTSAP),
-		CalledSelector:  binary.BigEndian.AppendUint16(nil, remoteTSAP),
-		TPDUSize:        &tpduSize,
-	}
-	return cr.MarshalBinary()
-}
-
-// EncodeCOTPDT builds a COTP Data TPDU with EOT and the given S7 payload (go-cotp).
-func EncodeCOTPDT(s7Payload []byte) ([]byte, error) {
-	dt := &cotp.DT{
-		EOT:      true,
-		UserData: s7Payload,
-	}
-	return dt.MarshalBinary()
 }

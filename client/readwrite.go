@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/otfabric/go-s7comm/model"
-	"github.com/otfabric/go-s7comm/transport"
 	"github.com/otfabric/go-s7comm/wire"
 )
 
@@ -24,7 +23,7 @@ func classifyOpError(err error) ReadStatus {
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return ReadStatusTimeout
 	}
-	if errors.Is(err, ErrNotConnected) || errors.Is(err, transport.ErrConnectionNotEstablished) {
+	if errors.Is(err, ErrNotConnected) {
 		return ReadStatusTransportErr
 	}
 	var s7Err *wire.S7Error

@@ -8,10 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/otfabric/go-cotp"
 	"github.com/otfabric/go-s7comm/model"
-	"github.com/otfabric/go-s7comm/transport"
-	"github.com/otfabric/go-s7comm/wire"
 )
 
 func TestCompareRead_InvalidRequest(t *testing.T) {
@@ -140,53 +137,16 @@ func TestCompareRead_TwoCandidatesWithFakeServer(t *testing.T) {
 
 	handleConn := func(conn net.Conn) {
 		defer func() { _ = conn.Close() }()
-		tr := transport.New(conn, 2*time.Second)
-		payload, _ := tr.Receive()
-		dec, _ := cotp.Decode(payload)
-		if dec.CR != nil {
-			cc := &cotp.CC{CDT: 0, DestinationRef: 0, SourceRef: 0, ClassOption: 0,
-				CallingSelector: dec.CR.CallingSelector, CalledSelector: dec.CR.CalledSelector, TPDUSize: dec.CR.TPDUSize}
-			ccBytes, _ := cc.MarshalBinary()
-			_ = tr.Send(ccBytes)
+		srv := acceptFakeCOTP(t, conn)
+		defer func() { _ = srv.Close() }()
+		serveFakeSetup(t, srv, 480)
+		ctx := context.Background()
+		tsdu, err := srv.ReadTSDU(ctx)
+		if err != nil || len(tsdu) < 12 {
+			return
 		}
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT != nil && len(dec.DT.UserData) >= 18 {
-			s7 := dec.DT.UserData
-			pduRef := binary.BigEndian.Uint16(s7[4:6])
-			resp := make([]byte, 20)
-			resp[0] = 0x32
-			resp[1] = byte(wire.ROSCTRAckData)
-			binary.BigEndian.PutUint16(resp[4:6], pduRef)
-			binary.BigEndian.PutUint16(resp[6:8], 8)
-			resp[12] = wire.FuncSetupComm
-			binary.BigEndian.PutUint16(resp[14:16], 2)
-			binary.BigEndian.PutUint16(resp[16:18], 2)
-			binary.BigEndian.PutUint16(resp[18:20], 480)
-			dtBytes, _ := wire.EncodeCOTPDT(resp)
-			_ = tr.Send(dtBytes)
-		}
-		payload, _ = tr.Receive()
-		dec, _ = cotp.Decode(payload)
-		if dec.DT != nil && len(dec.DT.UserData) >= 12 {
-			s7 := dec.DT.UserData
-			pduRef := binary.BigEndian.Uint16(s7[4:6])
-			readResp := make([]byte, 20)
-			readResp[0] = 0x32
-			readResp[1] = byte(wire.ROSCTRAckData)
-			binary.BigEndian.PutUint16(readResp[4:6], pduRef)
-			binary.BigEndian.PutUint16(readResp[6:8], 2)
-			binary.BigEndian.PutUint16(readResp[8:10], 6)
-			readResp[12] = wire.FuncReadVar
-			readResp[13] = 1
-			readResp[14] = wire.RetCodeSuccess
-			readResp[15] = 0x04
-			binary.BigEndian.PutUint16(readResp[16:18], 16)
-			readResp[18] = 0xAB
-			readResp[19] = 0xCD
-			dtBytes, _ := wire.EncodeCOTPDT(readResp)
-			_ = tr.Send(dtBytes)
-		}
+		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
+		_ = srv.WriteTSDU(ctx, buildReadVarResponse(pduRef, 16, []byte{0xAB, 0xCD}))
 	}
 
 	go func() {
@@ -252,53 +212,16 @@ func TestCompareRead_DifferentData(t *testing.T) {
 			}
 			func(conn net.Conn, data []byte) {
 				defer func() { _ = conn.Close() }()
-				tr := transport.New(conn, 2*time.Second)
-				payload, _ := tr.Receive()
-				dec, _ := cotp.Decode(payload)
-				if dec.CR != nil {
-					cc := &cotp.CC{CDT: 0, DestinationRef: 0, SourceRef: 0, ClassOption: 0,
-						CallingSelector: dec.CR.CallingSelector, CalledSelector: dec.CR.CalledSelector, TPDUSize: dec.CR.TPDUSize}
-					ccBytes, _ := cc.MarshalBinary()
-					_ = tr.Send(ccBytes)
+				srv := acceptFakeCOTP(t, conn)
+				defer func() { _ = srv.Close() }()
+				serveFakeSetup(t, srv, 480)
+				ctx := context.Background()
+				tsdu, err := srv.ReadTSDU(ctx)
+				if err != nil || len(tsdu) < 12 {
+					return
 				}
-				payload, _ = tr.Receive()
-				dec, _ = cotp.Decode(payload)
-				if dec.DT != nil && len(dec.DT.UserData) >= 18 {
-					s7 := dec.DT.UserData
-					pduRef := binary.BigEndian.Uint16(s7[4:6])
-					resp := make([]byte, 20)
-					resp[0] = 0x32
-					resp[1] = byte(wire.ROSCTRAckData)
-					binary.BigEndian.PutUint16(resp[4:6], pduRef)
-					binary.BigEndian.PutUint16(resp[6:8], 8)
-					resp[12] = wire.FuncSetupComm
-					binary.BigEndian.PutUint16(resp[14:16], 2)
-					binary.BigEndian.PutUint16(resp[16:18], 2)
-					binary.BigEndian.PutUint16(resp[18:20], 480)
-					dtBytes, _ := wire.EncodeCOTPDT(resp)
-					_ = tr.Send(dtBytes)
-				}
-				payload, _ = tr.Receive()
-				dec, _ = cotp.Decode(payload)
-				if dec.DT != nil && len(dec.DT.UserData) >= 12 {
-					s7 := dec.DT.UserData
-					pduRef := binary.BigEndian.Uint16(s7[4:6])
-					readResp := make([]byte, 20)
-					readResp[0] = 0x32
-					readResp[1] = byte(wire.ROSCTRAckData)
-					binary.BigEndian.PutUint16(readResp[4:6], pduRef)
-					binary.BigEndian.PutUint16(readResp[6:8], 2)
-					binary.BigEndian.PutUint16(readResp[8:10], 6)
-					readResp[12] = wire.FuncReadVar
-					readResp[13] = 1
-					readResp[14] = wire.RetCodeSuccess
-					readResp[15] = 0x04
-					binary.BigEndian.PutUint16(readResp[16:18], 16)
-					readResp[18] = data[0]
-					readResp[19] = data[1]
-					dtBytes, _ := wire.EncodeCOTPDT(readResp)
-					_ = tr.Send(dtBytes)
-				}
+				pduRef := binary.BigEndian.Uint16(tsdu[4:6])
+				_ = srv.WriteTSDU(ctx, buildReadVarResponse(pduRef, 16, data))
 			}(conn, data)
 		}
 	}()
