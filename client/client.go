@@ -8,8 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/otfabric/go-cotp"
 	"github.com/otfabric/go-s7comm/model"
-	"github.com/otfabric/go-s7comm/transport"
 	"github.com/otfabric/go-s7comm/wire"
 )
 
@@ -38,7 +38,7 @@ func (e *PDURefMismatchError) Error() string {
 type Client struct {
 	host          string
 	opts          options
-	conn          *transport.Conn
+	conn          *cotp.Conn
 	rack          int
 	slot          int
 	reqMu         sync.Mutex
@@ -162,7 +162,7 @@ func (c *Client) connectOnce(ctx context.Context, rack, slot int) error {
 	}
 	setup, err := performS7Setup(ctx, conn, 1, maxAmqCalling, maxAmqCalled, maxPDU)
 	if err != nil {
-		_ = conn.Close()
+		_ = closeCOTP(conn)
 		return fmt.Errorf("S7 setup: %w", err)
 	}
 	c.mu.Lock()
@@ -174,9 +174,7 @@ func (c *Client) connectOnce(ctx context.Context, rack, slot int) error {
 	c.maxAmqCalling = setup.MaxAmqCalling
 	c.maxAmqCalled = setup.MaxAmqCalled
 	c.mu.Unlock()
-	if oldConn != nil {
-		_ = oldConn.Close()
-	}
+	_ = closeCOTP(oldConn)
 	return nil
 }
 
@@ -184,7 +182,7 @@ func (c *Client) closeConnLocked() error {
 	if c.conn == nil {
 		return nil
 	}
-	err := c.conn.Close()
+	err := closeCOTP(c.conn)
 	c.conn = nil
 	c.rack, c.slot = 0, 0
 	c.localTSAP, c.remoteTSAP = 0, 0

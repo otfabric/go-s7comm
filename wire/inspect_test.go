@@ -4,28 +4,23 @@ import (
 	"testing"
 
 	"github.com/otfabric/go-cotp"
-	"github.com/otfabric/go-tpkt"
 )
 
-func encodeInspectDTFrame(t *testing.T, s7 []byte) []byte {
+func encodeInspectDT(t *testing.T, s7 []byte) []byte {
 	t.Helper()
 	dt := &cotp.DT{EOT: true, UserData: s7}
 	dtBytes, err := dt.MarshalBinary()
 	if err != nil {
 		t.Fatalf("DT.MarshalBinary: %v", err)
 	}
-	frame, err := tpkt.EncodePacket(dtBytes)
-	if err != nil {
-		t.Fatalf("tpkt.EncodePacket: %v", err)
-	}
-	return frame
+	return dtBytes
 }
 
-func TestInspectFrameTPKTOnly(t *testing.T) {
-	frame := encodeInspectDTFrame(t, nil)
-	s, err := InspectFrame(frame)
+func TestInspectTPDUEmptyDT(t *testing.T) {
+	tpdu := encodeInspectDT(t, nil)
+	s, err := InspectTPDU(tpdu)
 	if err != nil {
-		t.Fatalf("InspectFrame error: %v", err)
+		t.Fatalf("InspectTPDU error: %v", err)
 	}
 	if s.COTPType != byte(cotp.TypeDT) {
 		t.Fatalf("unexpected COTP type: 0x%02X", s.COTPType)
@@ -35,13 +30,13 @@ func TestInspectFrameTPKTOnly(t *testing.T) {
 	}
 }
 
-func TestInspectFrameWithS7(t *testing.T) {
+func TestInspectTPDUWithS7(t *testing.T) {
 	s7 := EncodeS7Header(ROSCTRJob, 1, 1, 0)
 	s7 = append(s7, FuncReadVar)
-	frame := encodeInspectDTFrame(t, s7)
-	s, err := InspectFrame(frame)
+	tpdu := encodeInspectDT(t, s7)
+	s, err := InspectTPDU(tpdu)
 	if err != nil {
-		t.Fatalf("InspectFrame error: %v", err)
+		t.Fatalf("InspectTPDU error: %v", err)
 	}
 	if s.ROSCTR != byte(ROSCTRJob) {
 		t.Fatalf("unexpected ROSCTR: 0x%02X", s.ROSCTR)
@@ -51,12 +46,11 @@ func TestInspectFrameWithS7(t *testing.T) {
 	}
 }
 
-func FuzzInspectFrame(f *testing.F) {
+func FuzzInspectTPDU(f *testing.F) {
 	dt := &cotp.DT{EOT: true, UserData: EncodeS7Header(ROSCTRJob, 1, 2, 0)}
-	dtBytes, _ := dt.MarshalBinary()
-	frame, _ := tpkt.EncodePacket(dtBytes)
-	f.Add(frame)
-	f.Fuzz(func(t *testing.T, frame []byte) {
-		_, _ = InspectFrame(frame)
+	tpdu, _ := dt.MarshalBinary()
+	f.Add(tpdu)
+	f.Fuzz(func(t *testing.T, tpdu []byte) {
+		_, _ = InspectTPDU(tpdu)
 	})
 }

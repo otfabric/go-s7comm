@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/otfabric/go-cotp"
-	"github.com/otfabric/go-s7comm/transport"
 )
 
 func TestCloseClearsConnection(t *testing.T) {
@@ -29,7 +28,7 @@ func TestCloseClearsConnection(t *testing.T) {
 	defer func() { _ = srv.Close() }()
 
 	c := New("127.0.0.1")
-	c.conn = transport.FromCOTP(cli)
+	c.conn = cli
 
 	if err := c.Close(); err != nil {
 		t.Fatalf("close failed: %v", err)

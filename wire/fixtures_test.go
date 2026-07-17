@@ -7,15 +7,15 @@ import (
 	"testing"
 
 	"github.com/otfabric/go-cotp"
-	"github.com/otfabric/go-tpkt"
 )
 
 func TestFixtureTPKTDTFrame(t *testing.T) {
+	// Fixture stores a full TPKT packet; strip the 4-byte header without importing go-tpkt.
 	raw := loadHexFixture(t, "../testdata/frames/tpkt_dt.hex")
-	payload, err := tpkt.DecodePacket(raw)
-	if err != nil {
-		t.Fatalf("tpkt.DecodePacket error: %v", err)
+	if len(raw) < 4 {
+		t.Fatalf("fixture too short for TPKT header: %d", len(raw))
 	}
+	payload := raw[4:]
 	if len(payload) == 0 {
 		t.Fatal("expected non-empty TPKT payload")
 	}

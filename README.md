@@ -7,11 +7,11 @@
 [![Codecov](https://codecov.io/gh/otfabric/go-s7comm/graph/badge.svg)](https://app.codecov.io/gh/otfabric/go-s7comm)
 [![Release](https://img.shields.io/github/v/release/otfabric/go-s7comm?label=release)](https://github.com/otfabric/go-s7comm/releases)
 
-A pure Go implementation of the Siemens S7 communication protocol. It builds on [go-tpkt](https://github.com/otfabric/go-tpkt) for RFC 1006 TPKT framing and [go-cotp](https://github.com/otfabric/go-cotp) for COTP (X.224) encode/decode.
+A pure Go implementation of the Siemens S7 communication protocol. It builds on [go-cotp](https://github.com/otfabric/go-cotp) for the TP0 transport service (complete TSDUs). TPKT framing is owned by go-cotp via [go-tpkt](https://github.com/otfabric/go-tpkt) and is not a direct dependency of this module.
 
 The library provides:
 
-- S7 client connection setup (TPKT + COTP + S7 setup communication)
+- S7 client connection setup (TCP + go-cotp TP0 + S7 setup communication)
 - Read/write operations for DB, inputs, outputs, and merkers (rich `ReadResult` with explicit status; CLI contract in [API.md](API.md))
 - Readable range scan and compare-read across rack/slot candidates
 - Device discovery over CIDR ranges with rack/slot probing
@@ -19,9 +19,22 @@ The library provides:
 - Block listing, block metadata retrieval, and block upload
 - Low-level wire parsing/encoding packages for protocol internals
 
-For complete API details, see [API.md](API.md). Changelog: [RELEASE.md](RELEASE.md) (current: v0.6.0).
+For complete API details, see [API.md](API.md). Changelog: [RELEASE.md](RELEASE.md) (current: v0.7.0).
 
-### Error and result semantics
+## Table of contents
+
+- [Error and result semantics](#error-and-result-semantics)
+- [Install](#install)
+- [Quickstart](#quickstart)
+- [Discovery](#discovery)
+- [Rack/Slot Probe](#rackslot-probe)
+- [Readable range scan](#readable-range-scan)
+- [Compare read](#compare-read)
+- [Package structure](#package-structure)
+- [Development](#development)
+- [Interop tests](#interop-tests)
+
+## Error and result semantics
 
 | Situation | How it is reported |
 |-----------|--------------------|
@@ -200,10 +213,10 @@ s7commctl probe rackslot --ip 192.168.0.10 --strict --first-confirmed
 
 ## Package structure
 
-- **client** — High-level client API (connect, read/write, range scan, compare read, discovery, rack/slot probe, SZL, blocks)
+- **client** — High-level client API (connect, read/write, range scan, compare read, discovery, rack/slot probe, SZL, blocks); uses [go-cotp](https://github.com/otfabric/go-cotp) `Connect` / `ReadTSDU` / `WriteTSDU`
 - **model** — Data models, areas, type decoders/encoders, device fingerprint structures
-- **transport** — TCP connection wrapper with TPKT framing ([go-tpkt](https://github.com/otfabric/go-tpkt)); Send/Receive work on TPDU payloads
-- **wire** — S7 PDU encode/decode and COTP helpers ([go-cotp](https://github.com/otfabric/go-cotp)); TPKT is handled by transport
+- **wire** — S7 PDU encode/decode and S7 TSAP helpers (no TPKT/COTP framing)
+- **interop** — Build-tagged (`-tags=interop`) black-box tests against [snap7-interop](https://github.com/otfabric/snap7-interop); not part of the library API
 
 ## Development
 
@@ -217,5 +230,23 @@ Useful targets:
 - `make test-race` — tests with race detector
 - `make coverage`
 - `make bench` — run benchmarks (discovery, probe, compare, wire parsers)
-- `make lint`
-- `make lint-ci`
+- `make lint` — staticcheck
+- `make lint-ci` — golangci-lint
+- `make vuln` — govulncheck
+- `make interop` — SNAP7 interop suite (requires Docker; see below)
+
+## Interop tests
+
+Black-box tests against both [snap7-interop](https://github.com/otfabric/snap7-interop) v0.1.0 servers (native Snap7 and pure-Python), using the full canonical fixture matrix. Servers listen on host ports **1102** (native) and **2102** (python); rack/slot is **0/2**.
+
+```sh
+make interop
+```
+
+This pulls pinned GHCR image digests, starts both containers per fixture, and runs `go test -tags=interop ./interop/...`. Unit `make check` does not include this suite.
+
+| Variable | Purpose |
+| --- | --- |
+| `SNAP_INTEROP_NATIVE_IMAGE` / `SNAP_INTEROP_PYTHON_IMAGE` | Override pinned image refs |
+| `SNAP_INTEROP_MANAGED=0` | Use already-running servers (`SNAP_INTEROP_NATIVE_ADDR` / `SNAP_INTEROP_PYTHON_ADDR`) |
+| `SNAP_INTEROP_FIXTURE=<id>` | Run a single fixture (e.g. `basic-db`) |

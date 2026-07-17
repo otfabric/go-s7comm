@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/otfabric/go-s7comm/transport"
+	"github.com/otfabric/go-cotp"
 	"github.com/otfabric/go-s7comm/wire"
 )
 
@@ -345,7 +345,7 @@ func applyProbeDefaults(req *RackSlotProbeRequest) {
 
 // runFollowUp sends a benign S7 request (SZL) on the existing conn and returns whether it succeeded.
 // pduRef is used for the request header. On success, confirmedBy is set to the strategy that worked.
-func runFollowUp(ctx context.Context, conn *transport.Conn, pduRef uint16, strategy ConfirmationKind) (ok bool, confirmedBy ConfirmationKind, errMsg string) {
+func runFollowUp(ctx context.Context, conn *cotp.Conn, pduRef uint16, strategy ConfirmationKind) (ok bool, confirmedBy ConfirmationKind, errMsg string) {
 	trySZL := func(szlID uint16) (bool, string) {
 		req := wire.EncodeSZLRequest(pduRef, szlID, 0)
 		if err := conn.WriteTSDU(ctx, req); err != nil {
@@ -436,7 +436,7 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 	c.LocalTSAP = localTSAP
 	c.RemoteTSAP = remoteTSAP
 
-	raw, err := transport.DialTCP(ctx, addr, req.Timeout)
+	raw, err := dialTCP(ctx, addr, req.Timeout)
 	if err != nil {
 		c.Stage = ProbeStageTCP
 		if isProbeTimeout(err) {
@@ -447,12 +447,7 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 		c.Error = err.Error()
 		return c
 	}
-	conn, err := transport.Connect(ctx, raw, transport.Config{
-		LocalTSAP:     localTSAP,
-		RemoteTSAP:    remoteTSAP,
-		Timeout:       req.Timeout,
-		MaxTPDULength: transport.DefaultMaxTPDULength,
-	})
+	conn, err := connectCOTP(ctx, raw, req.Timeout, localTSAP, remoteTSAP)
 	if err != nil {
 		c.Stage = ProbeStageCOTP
 		if isProbeTimeout(err) {
@@ -463,7 +458,7 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 		c.Error = err.Error()
 		return c
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() { _ = closeCOTP(conn) }()
 	setupRef := uint16(1)
 	setup, err := performS7Setup(ctx, conn, setupRef, 1, 1, 480)
 	if err != nil {
