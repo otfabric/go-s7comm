@@ -16,6 +16,9 @@ all: ## Format, vet, and test
 	@echo "Running all: fmt, vet, test"
 	@$(MAKE) fmt vet test
 
+# Build tag for the interop package (excluded from default ./... builds).
+INTEROP_TAGS := interop
+
 check: fmt lint lint-ci vuln vet test coverage ## Run all checks
 
 test: ## Run unit tests with race detector
@@ -36,11 +39,11 @@ cover: coverage ## Open coverage report in browser
 	@echo "Opening coverage report"
 	@go tool cover -html=coverage.out
 
-lint: ## Run staticcheck
+lint: ## Run staticcheck (includes -tags=interop for ./interop)
 	@echo "Running staticcheck"
-	@staticcheck ./...
+	@staticcheck -tags=$(INTEROP_TAGS) ./...
 
-lint-ci: ## Run golangci-lint
+lint-ci: ## Run golangci-lint (build-tags include interop; see .golangci.yml)
 	@echo "Running golangci-lint"
 	@golangci-lint run ./...
 
@@ -52,9 +55,11 @@ fmt: ## Format Go code with gofmt
 	@echo "Running gofmt"
 	@gofmt -w .
 
-vet: ## Run go vet
+vet: ## Run go vet (includes -tags=interop compile of ./interop)
 	@echo "Running go vet"
-	@go vet ./...
+	@go vet -tags=$(INTEROP_TAGS) ./...
+	@echo "Typechecking interop package (no tests run)"
+	@go test -tags=$(INTEROP_TAGS) -count=1 -run=^$$ ./interop/
 
 clean: ## Remove generated coverage artifacts
 	@rm -f coverage.out coverage.html

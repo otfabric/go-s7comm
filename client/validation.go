@@ -33,6 +33,23 @@ func validateAddress(addr model.Address) error {
 	return nil
 }
 
+// validateBitAddress checks BitAddress fields for ReadBit/WriteBit.
+func validateBitAddress(addr model.BitAddress) error {
+	if addr.ByteOffset < 0 {
+		return &ValidationError{Message: fmt.Sprintf("byte offset must be >= 0, got %d", addr.ByteOffset)}
+	}
+	if addr.BitOffset < 0 || addr.BitOffset > 7 {
+		return &ValidationError{Message: fmt.Sprintf("bit offset must be 0..7, got %d", addr.BitOffset)}
+	}
+	if addr.Area == model.AreaDB && addr.DBNumber < 0 {
+		return &ValidationError{Message: fmt.Sprintf("DB number must be >= 0, got %d", addr.DBNumber)}
+	}
+	if err := wire.ValidateArea(byte(addr.Area)); err != nil {
+		return &ValidationError{Message: err.Error()}
+	}
+	return nil
+}
+
 // validateCompareReadRequest checks CompareReadRequest fields. Returns an error for invalid input.
 // Zero candidates is allowed and yields an empty result.
 func validateCompareReadRequest(req CompareReadRequest) error {

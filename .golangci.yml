@@ -2,6 +2,10 @@ version: "2"
 
 run:
   timeout: 5m
+  # Include the //go:build interop package so undeclared names / dead code
+  # there are reported by make lint-ci / make check (not only make interop).
+  build-tags:
+    - interop
 
 linters:
   enable:

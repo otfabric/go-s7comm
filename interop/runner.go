@@ -170,19 +170,16 @@ func executeConcurrentRead(ctx context.Context, host string, port, rack, slot in
 
 func doRead(ctx context.Context, c *client.Client, exp Expectation) ([]byte, Outcome, error) {
 	if exp.HasBit {
-		// Public API is byte-oriented; read the containing byte and extract the bit.
-		res, err := readArea(ctx, c, exp.AreaType, exp.AreaNum, exp.Offset, 1)
+		addr, err := modelBitAddress(exp.AreaType, exp.AreaNum, exp.Offset, exp.Bit)
 		if err != nil {
-			return nil, classifyTransportOrProtocol(err), err
+			return nil, OutcomeProtocolFailure, err
 		}
-		if !res.OK() {
-			return nil, classifyReadResult(res), res.Err()
-		}
-		if len(res.Data) < 1 {
-			return nil, OutcomeProtocolFailure, fmt.Errorf("empty bit host byte")
+		v, err := c.ReadBit(ctx, addr)
+		if err != nil {
+			return nil, classifyWriteError(err), err
 		}
 		bitVal := byte(0)
-		if res.Data[0]&(1<<uint(exp.Bit)) != 0 {
+		if v {
 			bitVal = 1
 		}
 		return []byte{bitVal}, OutcomeSuccess, nil
@@ -204,25 +201,12 @@ func doRead(ctx context.Context, c *client.Client, exp Expectation) ([]byte, Out
 
 func doWrite(ctx context.Context, c *client.Client, exp Expectation) (Outcome, error) {
 	if exp.HasBit {
-		// Byte RMW via public API (client has no bit transport helpers yet).
-		res, err := readArea(ctx, c, exp.AreaType, exp.AreaNum, exp.Offset, 1)
+		addr, err := modelBitAddress(exp.AreaType, exp.AreaNum, exp.Offset, exp.Bit)
 		if err != nil {
-			return classifyTransportOrProtocol(err), err
+			return OutcomeProtocolFailure, err
 		}
-		if !res.OK() {
-			return classifyReadResult(res), res.Err()
-		}
-		b := byte(0)
-		if len(res.Data) > 0 {
-			b = res.Data[0]
-		}
-		set := len(exp.Data) > 0 && exp.Data[0] != 0
-		if set {
-			b |= 1 << uint(exp.Bit)
-		} else {
-			b &^= 1 << uint(exp.Bit)
-		}
-		if err := writeArea(ctx, c, exp.AreaType, exp.AreaNum, exp.Offset, []byte{b}); err != nil {
+		value := len(exp.Data) > 0 && exp.Data[0] != 0
+		if err := c.WriteBit(ctx, addr, value); err != nil {
 			return classifyWriteError(err), err
 		}
 		return OutcomeSuccess, nil
@@ -262,6 +246,19 @@ func modelAddress(areaType string, number, offset, size int) (model.Address, err
 	default:
 		return model.Address{}, fmt.Errorf("unsupported area type %q", areaType)
 	}
+}
+
+func modelBitAddress(areaType string, number, byteOffset, bitOffset int) (model.BitAddress, error) {
+	addr, err := modelAddress(areaType, number, byteOffset, 1)
+	if err != nil {
+		return model.BitAddress{}, err
+	}
+	return model.BitAddress{
+		Area:       addr.Area,
+		DBNumber:   addr.DBNumber,
+		ByteOffset: byteOffset,
+		BitOffset:  bitOffset,
+	}, nil
 }
 
 func classifyReadResult(res *client.ReadResult) Outcome {

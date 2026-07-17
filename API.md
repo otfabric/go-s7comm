@@ -126,6 +126,11 @@ type PDURefMismatchError struct{ Expected, Got uint16 }               // use err
 func (c *Client) ReadArea(ctx context.Context, addr model.Address) (*ReadResult, error)
 func (c *Client) WriteArea(ctx context.Context, addr model.Address, data []byte) error
 
+func (c *Client) ReadBit(ctx context.Context, addr model.BitAddress) (bool, error)
+func (c *Client) WriteBit(ctx context.Context, addr model.BitAddress, value bool) error
+func (c *Client) ReadDBBit(ctx context.Context, dbNumber, byteOffset, bitOffset int) (bool, error)
+func (c *Client) WriteDBBit(ctx context.Context, dbNumber, byteOffset, bitOffset int, value bool) error
+
 func (c *Client) ReadDB(ctx context.Context, dbNum, offset, size int) (*ReadResult, error)
 func (c *Client) WriteDB(ctx context.Context, dbNum, offset int, data []byte) error
 func (c *Client) ReadInputs(ctx context.Context, offset, size int) (*ReadResult, error)
@@ -138,7 +143,7 @@ Behavior notes:
 - Read methods return `*ReadResult` and a connection/setup `error`. Use `result.OK()` for success; `result.Err()` for a non-success read outcome; `result.Data` for the payload. Empty or short reads are never reported as success.
 - ReadArea chunks requests based on negotiated PDU size. Status is derived from requested vs returned length (success, short-read, empty-read) or from S7 item return codes (rejected). Non-success Read Var items with transport size `0x00` (common for Snap7 address faults) are surfaced as rejected with `ReturnCode` set, not as a protocol parse failure.
 - WriteArea writes `len(data)` bytes; `addr.Size` is ignored. Large payloads are chunked. Uses WriteVar with optional rate limiting. Invalid address returns `*ValidationError`.
-- There are no public bit-level ReadBit/WriteBit helpers; addresses are byte-oriented (`model.Address.Start` / `Size`).
+- `ReadBit` / `WriteBit` use native S7 BIT transport (not byte read-modify-write). `BitOffset` must be `0..7` (no wrap); invalid addresses return `*ValidationError`. `ReadDBBit` / `WriteDBBit` are DB helpers (`DB1.DBX10.3` → db=1, byte=10, bit=3).
 
 ### Range scan API
 
@@ -483,6 +488,14 @@ type Address struct {
     Start    int // byte offset
     Size     int // byte count
 }
+
+// BitAddress identifies a single bit (e.g. DB1.DBX10.3 → DBNumber=1, ByteOffset=10, BitOffset=3).
+type BitAddress struct {
+    Area       Area
+    DBNumber   int
+    ByteOffset int
+    BitOffset  int // 0..7; client rejects out-of-range (no wrap)
+}
 ```
 
 Additional classic area codes used by the wire layer (`wire.AreaDI`, `wire.AreaPeripheral`, S7-200 IEC areas, etc.) are validated via `wire.ValidateArea`; the high-level `model.Area` set above is what client helpers typically use.
@@ -599,6 +612,18 @@ func EncodeReadVarRequest(pduRef uint16, addrs []S7AnyAddress) []byte
 func ParseReadVarResponse(param, data []byte) ([]ReadVarItem, error)
 func EncodeWriteVarRequest(pduRef uint16, addr S7AnyAddress, value []byte) []byte
 func ParseWriteVarResponse(param, data []byte) error
+
+type S7AnyBitAddress struct {
+    Area       byte
+    DBNumber   int
+    ByteOffset int
+    BitOffset  int // 0..7; caller validated
+}
+func EncodeS7AnyBit(addr S7AnyBitAddress) []byte
+func EncodeReadVarBitRequest(pduRef uint16, addr S7AnyBitAddress) []byte
+func EncodeWriteVarBitRequest(pduRef uint16, addr S7AnyBitAddress, value bool) []byte
+func DecodeAsBit(item ReadVarItem) (bool, error)
+
 func NormalizeResponseDataLength(transportSize ResponseTransportSize, rawLength uint16) (int, error)
 
 func EncodeSZLRequest(pduRef, szlID, szlIndex uint16) []byte
@@ -614,7 +639,7 @@ func EncodeEndUploadRequest(pduRef uint16, sessionID string) []byte
 func ParseUploadResponse(param, data []byte) (*UploadChunk, error)
 ```
 
-`EncodeS7Any` / read-write helpers use byte transport size and byte offsets (bit address = `Start*8`). Only `SyntaxIDS7Any` is supported for encoding (`ValidateRequestSyntax`).
+`EncodeS7Any` / byte read-write helpers use byte transport size and byte offsets (start address = `Start*8` bits). Bit helpers (`EncodeS7AnyBit`, `EncodeReadVarBitRequest`, `EncodeWriteVarBitRequest`, `DecodeAsBit`) use request S7ANY transport `TransportSizeBit` (`0x01`) with start = `ByteOffset*8+BitOffset` (not multiplied again). Read/Write Var data sections use `DataTransportSizeBit` (`0x03`). Only `SyntaxIDS7Any` is supported for encoding (`ValidateRequestSyntax`).
 
 ### Inspection and errors
 

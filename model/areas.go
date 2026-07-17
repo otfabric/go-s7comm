@@ -40,3 +40,12 @@ type Address struct {
 	Start    int // Byte offset
 	Size     int // Number of bytes
 }
+
+// BitAddress identifies a single S7 bit (e.g. DB1.DBX10.3 → DBNumber=1, ByteOffset=10, BitOffset=3).
+// BitOffset must be in 0..7; invalid offsets are rejected by the client (no silent wrap).
+type BitAddress struct {
+	Area       Area
+	DBNumber   int
+	ByteOffset int
+	BitOffset  int
+}
