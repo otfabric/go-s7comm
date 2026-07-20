@@ -12,14 +12,14 @@ A pure Go implementation of the Siemens S7 communication protocol. It builds on 
 The library provides:
 
 - S7 client connection setup (TCP + go-cotp TP0 + S7 setup communication)
-- Read/write operations for DB, inputs, outputs, and markers (rich `ReadResult` with explicit status; CLI contract in [API.md](API.md)), plus native single-bit `ReadBit`/`WriteBit` (BIT transport, not byte RMW)
+- Read/write operations for DB, inputs, outputs, and markers (rich `ReadResult` with explicit status), plus native single-bit `ReadBit`/`WriteBit` (BIT transport, not byte RMW)
 - Readable range scan and compare-read across rack/slot candidates
 - Device discovery over CIDR ranges with rack/slot probing
 - SZL-based identification and diagnostics helpers
 - Block listing, block metadata retrieval, and block upload
 - Low-level wire parsing/encoding packages for protocol internals
 
-For complete API details, see [API.md](API.md). Changelog: [RELEASE.md](RELEASE.md) (current: v0.7.0).
+**Docs:** [API.md](API.md) (public API) · [ERRORS.md](ERRORS.md) (error and result semantics) · [RELEASE.md](RELEASE.md) (changelog, current: **v0.7.3**)
 
 ## Table of contents
 
@@ -39,9 +39,11 @@ For complete API details, see [API.md](API.md). Changelog: [RELEASE.md](RELEASE.
 | Situation | How it is reported |
 |-----------|--------------------|
 | Validation failure (bad input) | `*ValidationError`; use `errors.As(err, &ValidationError{})` to detect |
-| Read outcome (success / short / empty / rejected / timeout) | `ReadResult.Status` and `result.Err()` |
-| Metadata or control op failure (Identify, GetCPUState, ListBlocks, UploadBlock, …) | `error` return |
-| Partial info (e.g. one SZL ok, one failed) | `(value, error)` — both non-nil; use value and handle error |
+| Byte read outcome (success / short / empty / rejected / timeout) | `ReadResult.Status` and `result.Err()` |
+| Bit R/W, writes, Connect, Upload, GetCPUState, … | Strict `error` return |
+| Metadata / best-effort (Identify, GetBlockInfo, …) | May return `(value, error)` both non-nil |
+
+Full guide (statuses, sentinels, wire `S7Error`, CLI exit-code contract): **[ERRORS.md](ERRORS.md)**. API signatures: **[API.md](API.md)**.
 
 Context cancellation is only strongly effective when the context has a deadline; otherwise I/O can run until the connection timeout. Prefer `context.WithTimeout` or `context.WithDeadline` when you need bounded operations. A second `Connect()` on an already-connected client only replaces the session after the new handshake succeeds, so a failed reconnect does not drop a healthy session.
 

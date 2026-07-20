@@ -1,5 +1,21 @@
 # go-s7comm Releases
 
+## v0.7.3
+
+**Date:** 2026-07-20
+**Previous release:** v0.7.2
+
+### Summary
+
+- **Docs**: New [ERRORS.md](ERRORS.md) as the canonical guide for outcome models (`ReadResult` / `ReadStatus`), client sentinels (`ErrNotConnected`, `ValidationError`, …), wire `S7Error` / framing errors, detection patterns, and the CLI exit-code contract. [API.md](API.md) refreshed for v0.7.2+ (bit API, `UnsupportedSyntaxError`, wire sentinels) and points to ERRORS.md for semantics. [README.md](README.md) links API / ERRORS / RELEASE and keeps a short error summary.
+- **Dependencies**: Upgrade [go-cotp](https://github.com/otfabric/go-cotp) from `v1.0.0-rc.1` to **v1.0.2** (stable). No public API changes in go-s7comm.
+
+### Breaking changes
+
+- None (docs + dependency bump).
+
+---
+
 ## v0.7.2
 
 **Date:** 2026-07-18

@@ -1,7 +1,9 @@
 # API Reference: otfabric/go-s7comm
 
 This document describes the public API exposed by the module and gives practical behavior notes.
-Current release: **v0.7.0** (see [RELEASE.md](RELEASE.md)).
+Current release: **v0.7.3** (see [RELEASE.md](RELEASE.md)).
+
+Error and result semantics (when to use `errors.As` / `ReadResult.Status`, CLI exit-code contract, wire sentinels) live in **[ERRORS.md](ERRORS.md)**.
 
 ## Table of contents
 
@@ -27,11 +29,13 @@ Current release: **v0.7.0** (see [RELEASE.md](RELEASE.md)).
   - [PDUs](#pdus)
   - [Inspection and errors](#inspection-and-errors)
   - [Diagnostic helpers](#diagnostic-helpers)
+- [Related docs](#related-docs)
 
 ## Packages
 
 - **client** — High-level PLC operations (connect, read/write, range scan, compare read, discovery, rack/slot probe, SZL, blocks). Uses [go-cotp](https://github.com/otfabric/go-cotp) TP0 service (`Connect` / `ReadTSDU` / `WriteTSDU`); TPKT is owned by go-cotp via go-tpkt.
 - **model** — Domain data types, areas, value encoders/decoders, device and fingerprint structures
+- **model/codec** — Encode/decode helpers (also re-exported from `model`)
 - **wire** — S7 PDU encoding/parsing and S7 TSAP helpers (does not own TPKT or COTP framing)
 - **interop** — Not a library API. Build-tagged test package (`go test -tags=interop ./interop/...`) for snap7-interop dual-server black-box tests
 
@@ -64,7 +68,7 @@ Behavior notes:
 
 ### Read result model
 
-Read operations return a structured result so callers can distinguish success, short-read, empty-read, and rejection. The library does not define JSON or other serialization; that is left to CLI/API layers.
+Byte read operations return a structured result so callers can distinguish success, short-read, empty-read, and rejection. Full semantics, status meanings, and CLI exit-code guidance: **[ERRORS.md](ERRORS.md)**. The library does not define JSON or other serialization; that is left to CLI/API layers.
 
 ```go
 type ReadStatus string
@@ -112,14 +116,6 @@ type ValidationError struct{ Message string }                         // use err
 type PDURefMismatchError struct{ Expected, Got uint16 }               // use errors.As(err, &PDURefMismatchError{})
 ```
 
-**CLI contract (for s7commctl and other consumers):** To avoid ambiguity, CLIs should define:
-
-- **Top-level `error`**: Use for connection/setup failure (e.g. `Connect` failed, transport error). If non-nil, exit with a failure code; do not treat as success.
-- **`ReadResult.Status`**: Use for read outcome. If `err == nil` but `!result.OK()`, the read failed or was short/empty/rejected—exit failure unless the CLI explicitly allows it (e.g. `--allow-short`).
-- **Default behavior**: Treat `success` as success; treat `short-read`, `empty-read`, `rejected`, and other non-success statuses as failures (non-zero exit) and surface status in output.
-- **`--strict-read`**: If implemented, fail the command (non-zero exit) when status is not `success` or when `ReturnedLength != RequestedLength`; may also add a clear message in output. This should not change the *format* of output, only success/failure and optional wording.
-- **`--allow-short`**: If implemented, allow short-read (and optionally empty-read) to be reported as success for exploratory use, while still showing the actual status and lengths in output.
-
 ### Read/write API
 
 ```go
@@ -140,10 +136,10 @@ func (c *Client) ReadMerkers(ctx context.Context, offset, size int) (*ReadResult
 
 Behavior notes:
 
-- Read methods return `*ReadResult` and a connection/setup `error`. Use `result.OK()` for success; `result.Err()` for a non-success read outcome; `result.Data` for the payload. Empty or short reads are never reported as success.
+- Byte read methods return `*ReadResult` and a validation `error`. Use `result.OK()` for success; `result.Err()` for a non-success read outcome; `result.Data` for the payload. Empty or short reads are never reported as success. See [ERRORS.md](ERRORS.md).
 - ReadArea chunks requests based on negotiated PDU size. Status is derived from requested vs returned length (success, short-read, empty-read) or from S7 item return codes (rejected). Non-success Read Var items with transport size `0x00` (common for Snap7 address faults) are surfaced as rejected with `ReturnCode` set, not as a protocol parse failure.
 - WriteArea writes `len(data)` bytes; `addr.Size` is ignored. Large payloads are chunked. Uses WriteVar with optional rate limiting. Invalid address returns `*ValidationError`.
-- `ReadBit` / `WriteBit` use native S7 BIT transport (not byte read-modify-write). `BitOffset` must be `0..7` (no wrap); invalid addresses return `*ValidationError`. `ReadDBBit` / `WriteDBBit` are DB helpers (`DB1.DBX10.3` → db=1, byte=10, bit=3).
+- `ReadBit` / `WriteBit` use native S7 BIT transport (not byte read-modify-write) and return a **strict** `error` (not `ReadResult`). `BitOffset` must be `0..7` (no wrap); invalid addresses return `*ValidationError`. `ReadDBBit` / `WriteDBBit` are DB helpers (`DB1.DBX10.3` → db=1, byte=10, bit=3).
 
 ### Range scan API
 
@@ -663,16 +659,27 @@ type S7Error struct {
     Message string
 }
 
+type UnsupportedSyntaxError struct{ RawSyntaxID byte }
+
 func NewS7Error(class, code byte) *S7Error
 func NewS7ErrorWithParam(class, code byte, param []byte) *S7Error
 func ReturnCodeError(code byte) error
 func ParamErrorFromParam(param []byte) (code uint16, ok bool)
 func ParamErrorCodeString(code uint16) string
+
+var (
+    ErrShortS7Header        error // data too short for S7 header
+    ErrInvalidS7ProtocolID  error
+    ErrShortS7AckHeader     error
+    ErrS7PayloadLength      error
+    ErrTruncatedItemHeader  error
+    ErrTruncatedItemPayload error
+)
 ```
 
 `InspectTPDU` decodes a COTP TPDU payload (no TPKT header) and, when the TPDU carries DT user data starting with an S7 header, fills S7 summary fields. For full TPKT captures, peel the TPKT header with go-tpkt first.
 
-Key sentinel errors include short/invalid S7 headers and payload length mismatches (`ErrShortS7Header`, `ErrInvalidS7ProtocolID`, `ErrS7PayloadLength`, …). COTP codec/service errors come from go-cotp.
+When and how these surface through the client: **[ERRORS.md](ERRORS.md)**. COTP codec/service errors come from go-cotp.
 
 ### Diagnostic helpers
 
@@ -685,6 +692,12 @@ func ItemReturnCodeString(code byte) string
 func HeaderErrorString(class, code byte) string
 func SZLIDString(id uint16) string
 func ValidateArea(area byte) error
-func ValidateRequestSyntax(syntax byte) error
+func ValidateRequestSyntax(syntax byte) error // → UnsupportedSyntaxError when not S7ANY
 func (r ResponseTransportSize) String() string
 ```
+
+## Related docs
+
+- [ERRORS.md](ERRORS.md) — error and result semantics
+- [RELEASE.md](RELEASE.md) — changelog
+- [README.md](README.md) — overview and quickstart
