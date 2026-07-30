@@ -1,10 +1,10 @@
 # otfabric/go-s7comm - Siemens S7 Protocol Library for Go
 
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go Reference](https://pkg.go.dev/badge/github.com/otfabric/go-s7comm.svg)](https://pkg.go.dev/github.com/otfabric/go-s7comm)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/otfabric/go-s7comm)](https://goreportcard.com/report/github.com/otfabric/go-s7comm)
 [![CI](https://github.com/otfabric/go-s7comm/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/go-s7comm/actions/workflows/ci.yml)
-[![Codecov](https://codecov.io/gh/otfabric/go-s7comm/graph/badge.svg)](https://app.codecov.io/gh/otfabric/go-s7comm)
+[![Codecov](https://codecov.io/gh/otfabric/go-s7comm/graph/badge.svg)](https://codecov.io/gh/otfabric/go-s7comm)
 [![Release](https://img.shields.io/github/v/release/otfabric/go-s7comm?label=release)](https://github.com/otfabric/go-s7comm/releases)
 
 A pure Go implementation of the Siemens S7 communication protocol. It builds on [go-cotp](https://github.com/otfabric/go-cotp) for the TP0 transport service (complete TSDUs). TPKT framing is owned by go-cotp via [go-tpkt](https://github.com/otfabric/go-tpkt) and is not a direct dependency of this module.
@@ -19,20 +19,21 @@ The library provides:
 - Block listing, block metadata retrieval, and block upload
 - Low-level wire parsing/encoding packages for protocol internals
 
-**Docs:** [API.md](API.md) (public API) · [ERRORS.md](ERRORS.md) (error and result semantics) · [RELEASE.md](RELEASE.md) (changelog, current: **v0.7.3**)
+**Docs:** [API.md](API.md) (public API) · [ERRORS.md](ERRORS.md) (error and result semantics) · [OBSERVABILITY.md](OBSERVABILITY.md) (logging) · [RELEASE.md](RELEASE.md) (changelog)
 
 ## Table of contents
 
 - [Error and result semantics](#error-and-result-semantics)
 - [Install](#install)
+- [Project structure](#project-structure)
 - [Quickstart](#quickstart)
 - [Discovery](#discovery)
 - [Rack/Slot Probe](#rackslot-probe)
 - [Readable range scan](#readable-range-scan)
 - [Compare read](#compare-read)
-- [Package structure](#package-structure)
 - [Development](#development)
 - [Interop tests](#interop-tests)
+- [License](#license)
 
 ## Error and result semantics
 
@@ -45,7 +46,17 @@ The library provides:
 
 Full guide (statuses, sentinels, wire `S7Error`, CLI exit-code contract): **[ERRORS.md](ERRORS.md)**. API signatures: **[API.md](API.md)**.
 
-Context cancellation is only strongly effective when the context has a deadline; otherwise I/O can run until the connection timeout. Prefer `context.WithTimeout` or `context.WithDeadline` when you need bounded operations. A second `Connect()` on an already-connected client only replaces the session after the new handshake succeeds, so a failed reconnect does not drop a healthy session.
+**Context:** cancel without a deadline **is** effective on TCP dial and go-cotp
+TSDU I/O (via go-cotp’s deadline watcher), but mid-I/O cancel typically **aborts**
+the COTP session — reconnect afterward. Prefer `context.WithTimeout` /
+`WithDeadline` for wall-clock bounds. Client `WithTimeout` bounds **Connect**
+(and dial), not ongoing PDU reads/writes; without cancel and without a deadline,
+open-session I/O can block indefinitely. `UploadBlock` cleanup uses a separate
+500ms background context. Details: [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
+
+A second `Connect()` on an already-connected client only replaces the session
+after the new handshake succeeds, so a failed reconnect does not drop a healthy
+session. Logging is silent by default; see [OBSERVABILITY.md](OBSERVABILITY.md).
 
 ## Install
 
@@ -54,6 +65,25 @@ go get github.com/otfabric/go-s7comm
 ```
 
 Requires Go 1.23 or later.
+
+## Project structure
+
+```
+go-s7comm/
+├── doc.go             Module-root package docs (import client/model/wire)
+├── client/            High-level S7 API (Connect, R/W, discover, probe, SZL, blocks)
+├── model/             Areas, addresses, device info, codecs
+│   └── codec/         Typed encode/decode helpers
+├── wire/              S7 PDU encode/decode and TSAP helpers (no TPKT/COTP)
+├── interop/           Build-tagged (`-tags=interop`) Snap7 black-box tests
+├── testdata/          Frame fixtures
+├── API.md             Public API reference
+├── ERRORS.md          Error / ReadResult semantics
+├── OBSERVABILITY.md   Logging (silent by default)
+└── RELEASE.md         Release history
+```
+
+Transport stack: **client** → [go-cotp](https://github.com/otfabric/go-cotp) (`Connect` / `ReadTSDU` / `WriteTSDU`) → go-tpkt (owned by go-cotp). This module does not import go-tpkt directly.
 
 ## Quickstart
 
@@ -223,13 +253,6 @@ s7commctl probe rackslot --ip 192.168.0.10 --confirm szl
 s7commctl probe rackslot --ip 192.168.0.10 --strict --first-confirmed
 ```
 
-## Package structure
-
-- **client** — High-level client API (connect, read/write, range scan, compare read, discovery, rack/slot probe, SZL, blocks); uses [go-cotp](https://github.com/otfabric/go-cotp) `Connect` / `ReadTSDU` / `WriteTSDU`
-- **model** — Data models, areas, type decoders/encoders, device fingerprint structures
-- **wire** — S7 PDU encode/decode and S7 TSAP helpers (no TPKT/COTP framing)
-- **interop** — Build-tagged (`-tags=interop`) black-box tests against [snap7-interop](https://github.com/otfabric/snap7-interop); not part of the library API
-
 ## Development
 
 ```sh
@@ -262,3 +285,7 @@ This pulls pinned GHCR image digests, starts both containers per fixture, and ru
 | `SNAP_INTEROP_NATIVE_IMAGE` / `SNAP_INTEROP_PYTHON_IMAGE` | Override pinned image refs |
 | `SNAP_INTEROP_MANAGED=0` | Use already-running servers (`SNAP_INTEROP_NATIVE_ADDR` / `SNAP_INTEROP_PYTHON_ADDR`) |
 | `SNAP_INTEROP_FIXTURE=<id>` | Run a single fixture (e.g. `basic-db`) |
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](./LICENSE).

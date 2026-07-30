@@ -209,7 +209,23 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
 
 ## Context, reconnect, and concurrency
 
-- Context cancellation is only strongly effective when the context has a deadline; prefer `context.WithTimeout` / `WithDeadline`.
-- A second `Connect()` replaces the session only after the new handshake succeeds; a failed reconnect does not drop a healthy session.
-- The client does not auto-reconnect; after `Close` or transport failure, call `Connect` again.
-- Concurrent use is safe, but protocol ops are serialized per client (`reqMu`); long ops (e.g. `UploadBlock`) block other requests on that client.
+- **Cancel without deadline** is effective on TCP dial and go-cotp `WriteTSDU` /
+  `ReadTSDU` (go-cotp arms a watcher that forces a past deadline on `ctx.Done`).
+  Mid-I/O cancel usually **aborts** the COTP connection — treat the client as
+  disconnected and call `Connect` again.
+- Prefer `context.WithTimeout` / `WithDeadline` for wall-clock bounds on an
+  operation. Client option `WithTimeout` applies to **Connect**/dial (and is
+  wrapped into the handshake context); it does **not** automatically bound later
+  `ReadArea` / `sendReceive` calls.
+- Without cancel **and** without a deadline, open-session TSDU I/O can block
+  indefinitely.
+- Rate-limit waits, multi-chunk loops, discover/probe between jobs, and
+  auto rack/slot attempts honor `ctx.Err()` / `ctx.Done()`.
+- `UploadBlock` end-upload cleanup uses `context.WithTimeout(context.Background(), 500ms)`
+  and ignores the caller context (best-effort; cleanup errors are logged only).
+- A second `Connect()` replaces the session only after the new handshake succeeds;
+  a failed reconnect does not drop a healthy session.
+- The client does not auto-reconnect; after `Close` or transport failure, call
+  `Connect` again.
+- Concurrent use is safe, but protocol ops are serialized per client (`reqMu`);
+  long ops (e.g. `UploadBlock`) block other requests on that client.

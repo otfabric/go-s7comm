@@ -3,7 +3,10 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all check test test-race coverage cover bench lint lint-ci fmt vet clean test-interop interop
+.PHONY: help all check test test-race coverage cover bench lint lint-ci vuln fmt vet clean test-interop interop
+
+# Parent otfabric/go.work may pin older modules; isolate toolchain commands.
+export GOWORK := off
 
 # Pinned snap7-interop v0.1.0 multi-arch index digests (override to test other builds).
 SNAP_INTEROP_NATIVE_IMAGE ?= ghcr.io/otfabric/snap-interop-native@sha256:d630d021d58f52445c0e19d5ec19d58cf19f4316ca05ba2d8afeca8cb419a1db
@@ -54,6 +57,8 @@ vuln: ## Run govulncheck
 fmt: ## Format Go code with gofmt
 	@echo "Running gofmt"
 	@gofmt -w .
+	@echo "Running go fmt"
+	@go fmt ./...
 
 vet: ## Run go vet (includes -tags=interop compile of ./interop)
 	@echo "Running go vet"

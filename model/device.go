@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package model
 
 // DeviceInfo contains identification information about an S7 device

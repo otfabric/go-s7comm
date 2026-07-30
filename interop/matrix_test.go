@@ -1,5 +1,7 @@
 //go:build interop
 
+// SPDX-License-Identifier: MIT
+
 package interop
 
 import (

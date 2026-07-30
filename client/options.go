@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package client provides a high-level S7 client API.
 package client
 
@@ -23,7 +25,11 @@ type options struct {
 	maxAmqCalled  int
 }
 
-// Logger interface for client logging. Args are printf-style (e.g. Debug("msg: %v", err)).
+// Logger is an optional printf-style sink for client diagnostics.
+// Nil (the default when WithLogger is omitted) disables logging.
+// Methods are invoked synchronously on the request path and must not block.
+// Args follow fmt.Sprintf conventions (e.g. Error("Connect failed: %v", err)).
+// Use NewSlogLogger to adapt a slog.Handler without changing this interface.
 type Logger interface {
 	Debug(msg string, args ...interface{})
 	Info(msg string, args ...interface{})
@@ -83,7 +89,7 @@ func WithRateLimit(d time.Duration) Option {
 	return func(o *options) { o.rateLimit = d }
 }
 
-// WithLogger sets a logger
+// WithLogger sets an optional Logger. Nil disables logging (same as omitting the option).
 func WithLogger(l Logger) Option {
 	return func(o *options) { o.logger = l }
 }

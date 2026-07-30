@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package model
 
 // BlockType represents an S7 block type

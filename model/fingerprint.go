@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package model
 
 // Fingerprint contains detailed device fingerprint information

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package model
 
 import "github.com/otfabric/go-s7comm/model/codec"

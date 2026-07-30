@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package client
 
 import (
@@ -94,13 +96,13 @@ func (c *Client) Connect(ctx context.Context) error {
 	if autoRackSlot && !useExplicit {
 		err := c.autoConnect(ctx)
 		if err != nil && logger != nil {
-			logger.Error("Connect failed", err)
+			logger.Error("Connect failed: %v", err)
 		}
 		return err
 	}
 	err := c.connectOnce(ctx, rack, slot)
 	if err != nil && logger != nil {
-		logger.Error("Connect failed", err)
+		logger.Error("Connect failed: %v", err)
 	}
 	return err
 }

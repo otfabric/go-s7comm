@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package codec provides data conversion utilities for S7 types (big-endian words, reals, strings).
 // Used by the model package and by wire/client when interpreting PLC data.
 package codec

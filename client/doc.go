@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package client provides an S7 protocol client for connecting to Siemens PLCs,
 // reading and writing memory areas, and probing rack/slot and discovery.
 //

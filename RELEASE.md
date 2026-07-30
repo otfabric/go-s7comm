@@ -1,5 +1,54 @@
 # go-s7comm Releases
 
+## v0.7.4
+
+**Date:** 2026-07-30
+**Previous release:** v0.7.3
+
+## Summary
+
+Patch release: document logger and accurate context-cancel behaviour, add a thin
+`slog` adapter, bump go-cotp to v1.0.3, root/`model` package docs, and raise
+client test coverage. No S7 protocol or result-model changes.
+
+## Changes
+
+### Added
+
+- **`client.NewSlogLogger`** — adapts `slog.Handler` to the existing printf-style `Logger` (`nil` handler → no-op).
+- **OBSERVABILITY.md** — silent-by-default logging, sync callback cost, slog adapter; no metrics surface.
+- **`doc.go`** (module root, `package s7comm`) — points pkg.go.dev / importers at `client`, `model`, and `wire`.
+- **`model/doc.go`** — package overview for areas, addresses, device/connection info, and codec wrappers.
+
+### Changed
+
+- **Context docs** (README, ERRORS.md, API.md) — cancel without deadline is effective on dial/TSDU via go-cotp but typically aborts the session; `WithTimeout` bounds Connect, not later PDUs; document UploadBlock cleanup context.
+- **`Logger` / `WithLogger` godoc** — nil default, printf-style args, synchronous request-path cost.
+- **Connect logging** — `Error("Connect failed: %v", err)` so the error is formatted correctly.
+- **README** — **Project structure** tree (packages + docs); replaces the late bullet-only package list.
+- **README badges** — Added pkg.go.dev; normalized Go `1.23%2B` and Codecov link to `codecov.io/gh/...`.
+
+### Dependencies
+
+- **go-cotp** — `v1.0.2` → **v1.0.3** (docs-only upstream release).
+
+### License & open-source hygiene
+
+- **LICENSE** — Added root MIT license (`Copyright (c) 2026 OT Fabric`).
+- **SPDX headers** — Added `// SPDX-License-Identifier: MIT` to all first-party `.go` files (build tags preserved on `interop/`).
+- **README** — License section pointing at [LICENSE](./LICENSE).
+
+### Build / tooling
+
+- **Makefile** — exports `GOWORK=off`.
+- **Tests** — `client` package coverage raised above 85% (ListBlocks/GetBlockInfo, probeS7, autoConnect, SZL edges, PDU-ref mismatch, range-probe mixed results).
+
+### Unchanged
+
+- No change to `ReadResult` / `ReadStatus`, wire codecs, or cancel implementation (docs corrected to match go-cotp behaviour).
+
+---
+
 ## v0.7.3
 
 **Date:** 2026-07-20

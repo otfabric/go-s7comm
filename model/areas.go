@@ -1,4 +1,5 @@
-// Package model defines data types for S7 communications.
+// SPDX-License-Identifier: MIT
+
 package model
 
 // Area represents an S7 memory area

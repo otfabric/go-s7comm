@@ -1,5 +1,7 @@
 //go:build interop
 
+// SPDX-License-Identifier: MIT
+
 // Package interop runs black-box tests of go-s7comm against the published
 // snap7-interop SNAP7 servers (native Snap7 and pure-Python).
 //
