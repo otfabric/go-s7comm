@@ -1,5 +1,28 @@
 # go-s7comm Releases
 
+## v0.7.5
+
+**Date:** 2026-07-30
+**Previous release:** v0.7.4
+
+## Summary
+
+Patch release: bump go-cotp to v1.0.4 (pulls go-tpkt v1.0.1). No S7 protocol
+or result-model changes.
+
+## Changes
+
+### Dependencies
+
+- **go-cotp** — `v1.0.3` → **v1.0.4**
+- **go-tpkt** (indirect) — `v1.0.0` → **v1.0.1**
+
+### Unchanged
+
+- No API, wire, or behavioural changes. Import path remains `github.com/otfabric/go-s7comm`.
+
+---
+
 ## v0.7.4
 
 **Date:** 2026-07-30
