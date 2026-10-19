@@ -26,7 +26,7 @@ type Logger interface {
 logger := client.NewSlogLogger(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
     Level: slog.LevelDebug,
 }))
-c := client.NewClient("10.0.0.1", client.WithLogger(logger))
+c := client.New("10.0.0.1", client.WithLogger(logger))
 ```
 
 See [API.md](API.md) (Client options) for `WithLogger` / `NewSlogLogger`.

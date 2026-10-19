@@ -244,7 +244,7 @@ result, err := client.CompareRead(ctx, client.CompareReadRequest{
 // result.RackSlotInsensitive = true if all succeeded with identical data
 ```
 
-For CLI usage see [s7commctl probe rackslot](https://github.com/otfabric/go-s7commctl):
+For CLI usage see [s7commctl probe rackslot](https://github.com/otfabric/s7commctl):
 
 ```sh
 s7commctl probe rackslot --ip 192.168.0.10
