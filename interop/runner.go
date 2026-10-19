@@ -310,7 +310,7 @@ func classifyTransportOrProtocol(err error) Outcome {
 func mapItemReturnCode(code byte) Outcome {
 	switch code {
 	case wire.RetCodeAddressFault, wire.RetCodeNotAvailable:
-		// snap-interop normalizes OOR and RO-reject (0x0A) to address-out-of-range.
+		// snap7-interop normalizes OOR and RO-reject (0x0A) to address-out-of-range.
 		return OutcomeAddressOutOfRange
 	case 0x03: // write protected (not emitted by current adapters for RO fixtures)
 		return OutcomeWriteProtected
