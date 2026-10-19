@@ -3,7 +3,7 @@
 This document is the canonical guide to how go-s7comm reports failures.
 For method signatures and type layouts, see [API.md](API.md).
 
-Current release: **v0.7.3** (see [RELEASE.md](RELEASE.md)).
+Current release: **v0.7.5** (see [RELEASE.md](RELEASE.md)).
 
 ## Table of contents
 

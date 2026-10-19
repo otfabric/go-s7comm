@@ -1,7 +1,7 @@
 # API Reference: otfabric/go-s7comm
 
 This document describes the public API exposed by the module and gives practical behavior notes.
-Current release: **v0.7.3** (see [RELEASE.md](RELEASE.md)).
+Current release: **v0.7.5** (see [RELEASE.md](RELEASE.md)).
 
 Error and result semantics (when to use `errors.As` / `ReadResult.Status`, CLI exit-code contract, wire sentinels) live in **[ERRORS.md](ERRORS.md)**.
 
