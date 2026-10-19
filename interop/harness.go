@@ -17,10 +17,10 @@ import (
 	"time"
 )
 
-// Multi-arch index digests for snap7-interop v0.1.0.
+// Multi-arch index digests for snap7-interop v0.2.0.
 const (
-	defaultNativeImage = "ghcr.io/otfabric/snap-interop-native@sha256:d630d021d58f52445c0e19d5ec19d58cf19f4316ca05ba2d8afeca8cb419a1db"
-	defaultPythonImage = "ghcr.io/otfabric/snap-interop-python@sha256:11baf7133f9d5ae6c282c159aa7dd4fdf2ed7be55784719514ad43a19a73b85d"
+	defaultNativeImage = "ghcr.io/otfabric/snap-interop-native@sha256:54ce1a50212c85f7070a6898d5f615edfdabf2f6275c4f51e39d239d3c6fc7f6"
+	defaultPythonImage = "ghcr.io/otfabric/snap-interop-python@sha256:030caa869c29fd1ec2b2141ae966132d55b9dd5825916a190d1932af30c50faf"
 )
 
 type serverEndpoint struct {
