@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// Outcome mirrors snap-interop normalized probe results.
+// Outcome mirrors snap7-interop normalized probe results.
 type Outcome string
 
 const (
@@ -25,7 +25,7 @@ const (
 	OutcomeProtocolFailure   Outcome = "protocol-failure"
 )
 
-// CompiledFixture is the subset of a snap-interop compiled fixture used by the runner.
+// CompiledFixture is the subset of a snap7-interop compiled fixture used by the runner.
 type CompiledFixture struct {
 	ID           string
 	Revision     int
