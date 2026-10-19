@@ -8,9 +8,9 @@
 # Parent otfabric/go.work may pin older modules; isolate toolchain commands.
 export GOWORK := off
 
-# Pinned snap7-interop v0.1.0 multi-arch index digests (override to test other builds).
-SNAP_INTEROP_NATIVE_IMAGE ?= ghcr.io/otfabric/snap-interop-native@sha256:d630d021d58f52445c0e19d5ec19d58cf19f4316ca05ba2d8afeca8cb419a1db
-SNAP_INTEROP_PYTHON_IMAGE ?= ghcr.io/otfabric/snap-interop-python@sha256:11baf7133f9d5ae6c282c159aa7dd4fdf2ed7be55784719514ad43a19a73b85d
+# Pinned snap7-interop v0.2.0 multi-arch index digests (override to test other builds).
+SNAP_INTEROP_NATIVE_IMAGE ?= ghcr.io/otfabric/snap-interop-native@sha256:54ce1a50212c85f7070a6898d5f615edfdabf2f6275c4f51e39d239d3c6fc7f6
+SNAP_INTEROP_PYTHON_IMAGE ?= ghcr.io/otfabric/snap-interop-python@sha256:030caa869c29fd1ec2b2141ae966132d55b9dd5825916a190d1932af30c50faf
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
