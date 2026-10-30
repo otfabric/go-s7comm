@@ -153,6 +153,7 @@ Helpers: `HeaderErrorString`, `ItemReturnCodeString`, `ErrClassString`, `ParamEr
 | `ErrS7PayloadLength` | Framing |
 | `ErrTruncatedItemHeader` | Read Var item parse |
 | `ErrTruncatedItemPayload` | Read Var item parse |
+| `ErrUnknownBlockType` | `EncodeStartUploadRequest` input |
 
 COTP/TPKT transport errors come from [go-cotp](https://github.com/otfabric/go-cotp) / [go-tpkt](https://github.com/otfabric/go-tpkt), not this module.
 

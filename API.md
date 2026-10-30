@@ -681,6 +681,7 @@ var (
     ErrS7PayloadLength      error
     ErrTruncatedItemHeader  error
     ErrTruncatedItemPayload error
+    ErrUnknownBlockType     error // EncodeStartUploadRequest: unknown block type
 )
 ```
 
