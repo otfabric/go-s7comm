@@ -5,6 +5,10 @@
 **Date:** 2026-10-30
 **Previous release:** v0.7.5
 
+### Fixed
+
+- `Identify` panicked on a 20- or 21-byte module ID SZL payload; such a payload is now reported as too short.
+
 ### Dependencies
 
 - `go-cotp` v1.0.4 → v1.1.0.
