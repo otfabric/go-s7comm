@@ -15,6 +15,7 @@
 
 - `WithTimeout` and `RackSlotProbeRequest.Timeout` did not bound the S7 setup or the strict probe follow-up, so a peer that accepted COTP and then went silent blocked `Connect`, `Discover` and `ProbeRackSlots` until the caller's context ended. Such a probe now reports `timeout`.
 - `UploadBlock` with `BlockSDB` requested the DB of the same number; it now requests the SDB. No independent peer has exercised this.
+- The PDU reference counter could yield 0 after wrapping, which disabled response correlation for that request. 0 is now skipped.
 
 ### Dependencies
 

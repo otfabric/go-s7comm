@@ -195,8 +195,14 @@ func (c *Client) closeConnLocked() error {
 	return err
 }
 
+// nextPDURef returns the next PDU reference, skipping 0 because sendReceive treats 0 as
+// "no correlation".
 func (c *Client) nextPDURef() uint16 {
-	return uint16(atomic.AddUint32(&c.pduRef, 1))
+	for {
+		if ref := uint16(atomic.AddUint32(&c.pduRef, 1)); ref != 0 {
+			return ref
+		}
+	}
 }
 
 // sendReceive sends req and returns response param/data. When expectedPDURef is non-zero,

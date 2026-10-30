@@ -785,3 +785,40 @@ func TestUploadBlock_UnknownBlockTypeSendsNothing(t *testing.T) {
 		t.Fatalf("peer saw %d requests, want only the follow-up", n)
 	}
 }
+
+// PDU reference 0 disables correlation in sendReceive, so it must never be issued.
+func TestNextPDURef_SkipsZeroOnWrap(t *testing.T) {
+	cases := []struct {
+		name  string
+		start uint32
+		want  uint16
+	}{
+		{"16-bit wrap", 0xFFFF, 1},
+		{"later 16-bit wrap", 0x2FFFF, 1},
+		{"32-bit wrap", 0xFFFFFFFF, 1},
+		{"no wrap", 0x1233, 0x1234},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := New("127.0.0.1")
+			c.pduRef = tc.start
+			if got := c.nextPDURef(); got != tc.want {
+				t.Fatalf("nextPDURef() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// Across a wrap, a response with a stale reference must still be rejected.
+func TestSendReceive_CorrelatesAcrossPDURefWrap(t *testing.T) {
+	port := startScriptedPeer(t, nil, func(ref uint16, _ []byte) []byte {
+		return buildSZLReply(ref+1, wire.SZLCPUState, []byte{0, 0, 0x08, 0})
+	})
+	c := connectScripted(t, port)
+	c.pduRef = 0xFFFF
+
+	var mismatch *PDURefMismatchError
+	if _, err := c.GetCPUState(testContext(t)); !errors.As(err, &mismatch) {
+		t.Fatalf("err = %v, want PDURefMismatchError", err)
+	}
+}
