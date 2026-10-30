@@ -1,5 +1,16 @@
 # go-s7comm Releases
 
+## v0.8.0
+
+**Date:** 2026-10-30
+**Previous release:** v0.7.5
+
+### Dependencies
+
+- `go-cotp` v1.0.4 → v1.1.0.
+
+---
+
 ## v0.7.5
 
 **Date:** 2026-07-30
