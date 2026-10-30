@@ -462,7 +462,9 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 	}
 	defer func() { _ = closeCOTP(conn) }()
 	setupRef := uint16(1)
-	setup, err := performS7Setup(ctx, conn, setupRef, 1, 1, 480)
+	setupCtx, cancelSetup := withOptionalTimeout(ctx, req.Timeout)
+	defer cancelSetup()
+	setup, err := performS7Setup(setupCtx, conn, setupRef, 1, 1, 480)
 	if err != nil {
 		c.Stage = ProbeStageSetup
 		if isProbeTimeout(err) {
@@ -489,7 +491,9 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 
 	c.Stage = ProbeStageQuery
 	followUpRef := setupRef + 1
-	ok, confirmedBy, errStr := runFollowUp(ctx, conn, followUpRef, req.Confirm)
+	followUpCtx, cancelFollowUp := withOptionalTimeout(ctx, req.Timeout)
+	defer cancelFollowUp()
+	ok, confirmedBy, errStr := runFollowUp(followUpCtx, conn, followUpRef, req.Confirm)
 	if ok {
 		c.Status = StatusValidQuery
 		c.ConfirmedBy = confirmedBy

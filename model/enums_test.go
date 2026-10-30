@@ -64,3 +64,24 @@ func TestProtectionLevelString(t *testing.T) {
 		t.Fatalf("unexpected unknown protection string: %q", ProtectionLevel(255).String())
 	}
 }
+
+func TestEnumStringsCoverEveryValue(t *testing.T) {
+	states := map[CPUState]string{
+		CPUStateUnknown: "UNKNOWN", CPUStateRun: "RUN", CPUStateStop: "STOP",
+		CPUStateStartup: "STARTUP", CPUStateHold: "HOLD",
+	}
+	for state, want := range states {
+		if got := state.String(); got != want {
+			t.Errorf("CPUState(%d).String() = %q, want %q", state, got, want)
+		}
+	}
+	levels := map[ProtectionLevel]string{
+		ProtectionNone: "No Protection", ProtectionRead: "Write Protected",
+		ProtectionReadWrite: "Read/Write Protected", ProtectionFull: "Full Protection",
+	}
+	for level, want := range levels {
+		if got := level.String(); got != want {
+			t.Errorf("ProtectionLevel(%d).String() = %q, want %q", level, got, want)
+		}
+	}
+}

@@ -20,6 +20,9 @@ var (
 	serialRegex   = regexp.MustCompile(`(?i)[A-Z0-9]{8,24}`)
 )
 
+// moduleIDRecordSize is the 2-byte index plus the 20-byte order number that Identify reads.
+const moduleIDRecordSize = 22
+
 // readModuleIDSZL performs the SZL 0x0011 (Module ID) read and returns the raw SZL data payload.
 // Transport-only; no heuristic parsing. Used by Identify.
 func (c *Client) readModuleIDSZL(ctx context.Context) ([]byte, error) {
@@ -68,7 +71,7 @@ func (c *Client) Identify(ctx context.Context) (*model.DeviceInfo, error) {
 	rawModule, errMod := c.readModuleIDSZL(ctx)
 	if errMod != nil {
 		errs = append(errs, errMod)
-	} else if len(rawModule) >= 20 {
+	} else if len(rawModule) >= moduleIDRecordSize {
 		info.OrderNumber = trimString(rawModule[2:22])
 		populateInfoFromRaw(info, rawModule)
 	} else if len(rawModule) > 0 {

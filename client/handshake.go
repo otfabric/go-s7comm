@@ -33,6 +33,14 @@ func dialTCP(ctx context.Context, address string, timeout time.Duration) (net.Co
 	return raw, nil
 }
 
+// withOptionalTimeout bounds ctx by timeout when timeout is positive.
+func withOptionalTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(ctx, timeout)
+	}
+	return ctx, func() {}
+}
+
 // connectCOTP completes the TP0 handshake on an owned raw connection.
 // On failure go-cotp closes raw.
 func connectCOTP(ctx context.Context, raw net.Conn, timeout time.Duration, localTSAP, remoteTSAP uint16) (*cotp.Conn, error) {

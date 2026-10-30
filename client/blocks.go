@@ -137,6 +137,7 @@ func (c *Client) GetBlockInfo(ctx context.Context, bt model.BlockType, num int) 
 }
 
 // UploadBlock uploads a block from the PLC. Block numbers must be in 0..65535.
+// An unknown block type returns ValidationError without sending a request.
 // It performs a best-effort end-upload cleanup before returning; this may add a short delay on completion.
 // Cleanup errors are not returned to the caller; cleanup uses a 500ms timeout to limit that delay.
 func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (*model.BlockData, error) {
@@ -147,7 +148,10 @@ func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (
 	defer c.reqMu.Unlock()
 
 	ref := c.nextPDURef()
-	req := wire.EncodeStartUploadRequest(ref, byte(bt), num)
+	req, err := wire.EncodeStartUploadRequest(ref, byte(bt), num)
+	if err != nil {
+		return nil, &ValidationError{Message: err.Error()}
+	}
 	param, _, err := c.sendReceive(ctx, req, ref)
 	if err != nil {
 		return nil, err

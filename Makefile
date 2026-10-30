@@ -20,7 +20,7 @@ all: ## Format, vet, and test
 	@$(MAKE) fmt vet test
 
 # Same value as coverage-min in .github/workflows/ci.yml; raise both together.
-COVER_MIN := 88
+COVER_MIN := 90
 FUZZTIME ?= 10s
 
 # Build tag for the interop package (excluded from default ./... builds).

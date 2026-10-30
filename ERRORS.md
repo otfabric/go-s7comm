@@ -153,6 +153,7 @@ Helpers: `HeaderErrorString`, `ItemReturnCodeString`, `ErrClassString`, `ParamEr
 | `ErrS7PayloadLength` | Framing |
 | `ErrTruncatedItemHeader` | Read Var item parse |
 | `ErrTruncatedItemPayload` | Read Var item parse |
+| `ErrUnknownBlockType` | `EncodeStartUploadRequest` input |
 
 COTP/TPKT transport errors come from [go-cotp](https://github.com/otfabric/go-cotp) / [go-tpkt](https://github.com/otfabric/go-tpkt), not this module.
 
@@ -215,7 +216,7 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
   disconnected and call `Connect` again.
 - Prefer `context.WithTimeout` / `WithDeadline` for wall-clock bounds on an
   operation. Client option `WithTimeout` applies to **Connect**/dial (and is
-  wrapped into the handshake context); it does **not** automatically bound later
+  wrapped into the COTP and S7 setup contexts); it does **not** automatically bound later
   `ReadArea` / `sendReceive` calls.
 - Without cancel **and** without a deadline, open-session TSDU I/O can block
   indefinitely.
