@@ -423,7 +423,7 @@ func (c *Client) GetBlockInfo(ctx context.Context, bt model.BlockType, num int) 
 func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (*model.BlockData, error)
 ```
 
-- **GetBlockInfo**: Best-effort; on transport/protocol failure returns `(nil, err)`; on parse failure after transport success returns partial `BlockInfo` (Type, Number) plus `err`. Invalid block number returns `*ValidationError`.
+- **GetBlockInfo**: Best-effort; on transport/protocol failure returns `(nil, err)`; on parse failure after transport success returns partial `BlockInfo` (Type, Number) plus `err`. Invalid block number or unknown block type returns `*ValidationError`.
 - **UploadBlock**: Performs a best-effort end-upload cleanup before returning (500ms timeout); cleanup errors are not returned. Invalid block number returns `*ValidationError`.
 
 ### Client options
@@ -635,7 +635,7 @@ func ParseSZLResponse(data []byte) (*SZLResponse, error)
 func EncodeBlockListRequest(pduRef uint16, blockType byte) []byte
 func ParseBlockListResponse(szlData []byte) ([]BlockListEntry, error)
 func ParseBlockInfoResponse(szlData []byte) (BlockInfoData, error)
-func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) []byte
+func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) ([]byte, error)
 func ParseStartUploadResponse(param []byte) (string, error)
 func EncodeUploadRequest(pduRef uint16, sessionID string) []byte
 func EncodeEndUploadRequest(pduRef uint16, sessionID string) []byte

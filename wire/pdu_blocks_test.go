@@ -112,7 +112,10 @@ func TestParseUploadResponse(t *testing.T) {
 }
 
 func TestEncodeStartUploadRequest(t *testing.T) {
-	msg := EncodeStartUploadRequest(1, BlockTypeDB, 42)
+	msg, err := EncodeStartUploadRequest(1, BlockTypeDB, 42)
+	if err != nil {
+		t.Fatalf("EncodeStartUploadRequest: %v", err)
+	}
 	if len(msg) < 20 {
 		t.Fatalf("expected request length >= 20, got %d", len(msg))
 	}

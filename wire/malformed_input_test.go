@@ -190,7 +190,10 @@ func TestEncodeStartUploadRequest_BlockTypeCharacter(t *testing.T) {
 		{BlockTypeSFB, 'F'},
 	}
 	for _, tc := range cases {
-		req := EncodeStartUploadRequest(1, tc.blockType, 1234)
+		req, err := EncodeStartUploadRequest(1, tc.blockType, 1234)
+		if err != nil {
+			t.Fatalf("block type 0x%02X: %v", tc.blockType, err)
+		}
 		filename := req[S7HeaderSize+9:]
 		if filename[1] != tc.want {
 			t.Errorf("block type 0x%02X: character %q, want %q", tc.blockType, filename[1], tc.want)
@@ -321,8 +324,23 @@ func TestROSCTRClassification(t *testing.T) {
 
 // SDB is a block type of the client API; its upload must not name a DB of the same number.
 func TestEncodeStartUploadRequest_SDBIsNotDB(t *testing.T) {
-	req := EncodeStartUploadRequest(1, BlockTypeSDB, 7)
+	req, err := EncodeStartUploadRequest(1, BlockTypeSDB, 7)
+	if err != nil {
+		t.Fatalf("EncodeStartUploadRequest: %v", err)
+	}
 	if got := req[S7HeaderSize+9+1]; got != 'B' {
 		t.Fatalf("block type character = %q, want 'B'", got)
+	}
+}
+
+func TestEncodeStartUploadRequest_UnknownBlockType(t *testing.T) {
+	for _, blockType := range []byte{0x00, 0x37, 0x39, 0x40, 0x47, 0xFF} {
+		req, err := EncodeStartUploadRequest(1, blockType, 7)
+		if !errors.Is(err, ErrUnknownBlockType) {
+			t.Fatalf("block type 0x%02X: err = %v, want ErrUnknownBlockType", blockType, err)
+		}
+		if req != nil {
+			t.Fatalf("block type 0x%02X: request = %x, want nil", blockType, req)
+		}
 	}
 }

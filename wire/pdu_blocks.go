@@ -95,8 +95,9 @@ func ParseBlockListResponse(szlData []byte) ([]BlockListEntry, error) {
 	return entries, nil
 }
 
-// EncodeStartUploadRequest creates a start upload request
-func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) []byte {
+// EncodeStartUploadRequest creates a start upload request.
+// An unknown block type returns ErrUnknownBlockType, so a bad type cannot request a different block.
+func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) ([]byte, error) {
 	// File identifier: _XYYYYY
 	// X = block type char, YYYYY = block number
 	var typeChar byte
@@ -116,7 +117,7 @@ func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) []byt
 	case BlockTypeSFB:
 		typeChar = 'F'
 	default:
-		typeChar = 'A'
+		return nil, fmt.Errorf("%w: 0x%02X", ErrUnknownBlockType, blockType)
 	}
 
 	// Parameter header
@@ -146,7 +147,7 @@ func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) []byt
 	param = append(param, filename...)
 
 	header := EncodeS7Header(ROSCTRJob, pduRef, len(param), 0)
-	return append(header, param...)
+	return append(header, param...), nil
 }
 
 // ParseStartUploadResponse extracts upload session ID from upload start response parameters.

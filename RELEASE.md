@@ -5,6 +5,10 @@
 **Date:** 2026-10-30
 **Previous release:** v0.7.5
 
+### Breaking changes
+
+- `wire.EncodeStartUploadRequest` now returns `([]byte, error)`. An unknown block type returns the new `wire.ErrUnknownBlockType` instead of requesting a DB, and `UploadBlock` returns `*ValidationError` for it without sending a request.
+
 ### Fixed
 
 - `Identify` panicked on a 20- or 21-byte module ID SZL payload; such a payload is now reported as too short.

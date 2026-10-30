@@ -16,6 +16,7 @@ var (
 	ErrTruncatedItemPayload = errors.New("read response item payload truncated or overrun")
 	ErrInvalidParamLength   = errors.New("invalid parameter section length")
 	ErrInvalidDataLength    = errors.New("invalid data section length")
+	ErrUnknownBlockType     = errors.New("unknown block type")
 )
 
 // S7 Error classes

@@ -761,3 +761,27 @@ func TestCompareRead_CanceledMarksEveryCandidate(t *testing.T) {
 		t.Fatal("RackSlotInsensitive must be false when every candidate failed")
 	}
 }
+
+func TestUploadBlock_UnknownBlockTypeSendsNothing(t *testing.T) {
+	var requests atomic.Int32
+	port := startScriptedPeer(t, nil, func(uint16, []byte) []byte {
+		requests.Add(1)
+		return nil
+	})
+	c := connectScripted(t, port)
+
+	var verr *ValidationError
+	if _, err := c.UploadBlock(testContext(t), model.BlockType(0x99), 1); !errors.As(err, &verr) {
+		t.Fatalf("err = %v, want *ValidationError", err)
+	}
+	if !strings.Contains(verr.Message, "0x99") {
+		t.Fatalf("Message = %q, want the raw block type", verr.Message)
+	}
+	// A follow-up request proves the session is intact and nothing was sent before it.
+	if _, err := c.GetCPUState(testContext(t)); err == nil {
+		t.Fatal("expected the scripted peer to close on the follow-up request")
+	}
+	if n := requests.Load(); n != 1 {
+		t.Fatalf("peer saw %d requests, want only the follow-up", n)
+	}
+}
