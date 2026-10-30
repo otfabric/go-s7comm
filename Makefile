@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all check test test-race coverage cover bench lint lint-ci vuln fmt vet clean test-interop interop
+.PHONY: help all check test test-race coverage coverage-check cover fuzz cross bench lint lint-ci vuln fmt vet clean test-interop interop
 
 # Parent otfabric/go.work may pin older modules; isolate toolchain commands.
 export GOWORK := off
@@ -18,6 +18,10 @@ help: ## Show this help
 all: ## Format, vet, and test
 	@echo "Running all: fmt, vet, test"
 	@$(MAKE) fmt vet test
+
+# Same value as coverage-min in .github/workflows/ci.yml; raise both together.
+COVER_MIN := 88
+FUZZTIME ?= 10s
 
 # Build tag for the interop package (excluded from default ./... builds).
 INTEROP_TAGS := interop
@@ -38,9 +42,27 @@ coverage: ## Run tests with coverage (writes coverage.out)
 	@echo "Running coverage"
 	@go test -count=1 -race -coverprofile=coverage.out -covermode=atomic ./...
 
+coverage-check: coverage ## Fail below COVER_MIN (the go-ci coverage-min)
+	@total=$$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%","",$$3); print $$3}'); \
+	awk -v t="$$total" -v m="$(COVER_MIN)" 'BEGIN { if (t+0 < m+0) { printf "coverage %.1f%% < %s%%\n", t, m; exit 1 } else printf "coverage %.1f%% >= %s%%\n", t, m }'
+
 cover: coverage ## Open coverage report in browser
 	@echo "Opening coverage report"
 	@go tool cover -html=coverage.out
+
+fuzz: ## Run every Fuzz target for FUZZTIME (targets discovered, never listed)
+	@for pkg in $$(go list ./...); do \
+		for t in $$(go test -list '^Fuzz' $$pkg | grep '^Fuzz'); do \
+			echo "fuzz $$pkg $$t"; \
+			go test -run '^$$' -fuzz "^$$t$$" -fuzztime $(FUZZTIME) $$pkg || exit 1; \
+		done; \
+	done
+
+cross: ## Cross-compile without cgo for supported platforms
+	@for p in linux/amd64 linux/arm64 linux/arm darwin/arm64 windows/amd64; do \
+		echo "build $$p"; \
+		CGO_ENABLED=0 GOOS=$${p%/*} GOARCH=$${p#*/} go build ./... || exit 1; \
+	done
 
 lint: ## Run staticcheck (includes -tags=interop for ./interop)
 	@echo "Running staticcheck"

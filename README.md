@@ -19,7 +19,7 @@ The library provides:
 - Block listing, block metadata retrieval, and block upload
 - Low-level wire parsing/encoding packages for protocol internals
 
-**Docs:** [API.md](API.md) (public API) · [ERRORS.md](ERRORS.md) (error and result semantics) · [OBSERVABILITY.md](OBSERVABILITY.md) (logging) · [RELEASE.md](RELEASE.md) (changelog)
+**Docs:** [API.md](API.md) (public API) · [ERRORS.md](ERRORS.md) (error and result semantics) · [OBSERVABILITY.md](OBSERVABILITY.md) (logging) · [ARCHITECTURE.md](ARCHITECTURE.md) (layers, concurrency) · [TESTING.md](TESTING.md) (test tiers) · [INTEROPERABILITY.md](INTEROPERABILITY.md) (peers, results) · [Feature status](docs/FEATURE-STATUS.md) · [LIMITATIONS.md](LIMITATIONS.md) · [RELEASE.md](RELEASE.md) (changelog)
 
 ## Table of contents
 
@@ -264,6 +264,9 @@ Useful targets:
 - `make test`
 - `make test-race` — tests with race detector
 - `make coverage`
+- `make coverage-check` — fail below the CI minimum
+- `make fuzz` — run every fuzz target (`FUZZTIME`, default 10s)
+- `make cross` — cross-compile without cgo
 - `make bench` — run benchmarks (discovery, probe, compare, wire parsers)
 - `make lint` — staticcheck
 - `make lint-ci` — golangci-lint
