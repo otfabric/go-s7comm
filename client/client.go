@@ -162,7 +162,9 @@ func (c *Client) connectOnce(ctx context.Context, rack, slot int) error {
 	if err != nil {
 		return err
 	}
-	setup, err := performS7Setup(ctx, conn, 1, maxAmqCalling, maxAmqCalled, maxPDU)
+	setupCtx, cancelSetup := withOptionalTimeout(ctx, timeout)
+	defer cancelSetup()
+	setup, err := performS7Setup(setupCtx, conn, 1, maxAmqCalling, maxAmqCalled, maxPDU)
 	if err != nil {
 		_ = closeCOTP(conn)
 		return fmt.Errorf("S7 setup: %w", err)

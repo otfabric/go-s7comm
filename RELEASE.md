@@ -9,6 +9,8 @@
 
 - `Identify` panicked on a 20- or 21-byte module ID SZL payload; such a payload is now reported as too short.
 
+- `WithTimeout` and `RackSlotProbeRequest.Timeout` did not bound the S7 setup or the strict probe follow-up, so a peer that accepted COTP and then went silent blocked `Connect`, `Discover` and `ProbeRackSlots` until the caller's context ended. Such a probe now reports `timeout`.
+
 ### Dependencies
 
 - `go-cotp` v1.0.4 → v1.1.0.
