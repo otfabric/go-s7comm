@@ -16,6 +16,10 @@ This repository follows **otfabric/engineering policy 1.0**, profile **protocol-
 | Errors, `ReadResult` statuses, context and reconnect semantics | ERRORS.md |
 | Scope not implemented, verification | LIMITATIONS.md |
 | Logging | OBSERVABILITY.md |
+| Layers, concurrency | ARCHITECTURE.md |
+| Test tiers | TESTING.md |
+| Peers, results | INTEROPERABILITY.md |
+| Feature verification | docs/FEATURE-STATUS.md |
 | Release history | RELEASE.md |
 
 ## Hard rules
