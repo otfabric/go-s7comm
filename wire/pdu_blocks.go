@@ -105,6 +105,8 @@ func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) []byt
 		typeChar = '8'
 	case BlockTypeDB:
 		typeChar = 'A'
+	case BlockTypeSDB:
+		typeChar = 'B'
 	case BlockTypeFC:
 		typeChar = 'C'
 	case BlockTypeFB:

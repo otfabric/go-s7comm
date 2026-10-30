@@ -318,3 +318,11 @@ func TestROSCTRClassification(t *testing.T) {
 		}
 	}
 }
+
+// SDB is a block type of the client API; its upload must not name a DB of the same number.
+func TestEncodeStartUploadRequest_SDBIsNotDB(t *testing.T) {
+	req := EncodeStartUploadRequest(1, BlockTypeSDB, 7)
+	if got := req[S7HeaderSize+9+1]; got != 'B' {
+		t.Fatalf("block type character = %q, want 'B'", got)
+	}
+}
