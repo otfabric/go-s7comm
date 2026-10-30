@@ -24,7 +24,7 @@ This repository follows **otfabric/engineering policy 1.0**, profile **protocol-
 
 ## Hard rules
 
-1. Never lower the go-ci `coverage-min` (88 today, below the profile floor of 90: raise it as tests are added), add lint suppressions, or skip/delete tests to make CI pass.
+1. Never lower the go-ci `coverage-min` (90, the profile floor), add lint suppressions, or skip/delete tests to make CI pass.
 2. Never invent protocol semantics or claim support beyond recorded evidence.
 3. TPKT belongs to go-cotp: this module does not import go-tpkt directly.
 4. Exported API changes are breaking for s7commctl: this library stays on v0 or v1.

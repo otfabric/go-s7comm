@@ -32,7 +32,7 @@ With managed servers and no Docker, the suite skips (`interop/harness.go`). Ther
 
 ## Coverage policy
 
-`make coverage` and the go-ci coverage job measure `./...` with `-covermode=atomic`; no package is excluded in this repository's configuration. The minimum is `coverage-min` in [.github/workflows/ci.yml](.github/workflows/ci.yml), mirrored by `COVER_MIN` in the [Makefile](Makefile). It is 88, below the profile floor of 90. Raise both as tests are added; never lower them.
+`make coverage` and the go-ci coverage job measure `./...` with `-covermode=atomic`; no package is excluded in this repository's configuration. The minimum is `coverage-min` in [.github/workflows/ci.yml](.github/workflows/ci.yml), mirrored by `COVER_MIN` in the [Makefile](Makefile). It is 90, the profile floor. Raise both as tests are added; never lower them.
 
 ## Fuzzing
 

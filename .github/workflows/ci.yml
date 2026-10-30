@@ -16,8 +16,8 @@ jobs:
     uses: otfabric/.github/.github/workflows/go-ci.yml@v2.1.0
     with:
       run-govulncheck: true
-      # Measured 88.1% in go-ci; the profile floor is 90. Raise as tests are added.
-      coverage-min: "88"
+      # Profile floor. Never lower; raise as tests are added.
+      coverage-min: "90"
       fuzz-time: 10s
       codecov-name: go-s7comm
       go-versions: '["1.23", "1.24", "1.25", "1.26"]'
