@@ -1,5 +1,5 @@
 # Ignore the bin directory
-bin/
+/bin/
 
 # Ignore VS Code settings
 .vscode/
@@ -8,3 +8,7 @@ bin/
 cover.*
 coverage.*
 
+# Build artefacts live in /bin/ and /release/ (otfabric/engineering REPO-005)
+/release/
+*.test
+coverage.out
