@@ -1,5 +1,17 @@
 # go-s7comm Releases
 
+## v0.8.1
+
+**Date:** 2026-10-31
+**Previous release:** v0.8.0
+
+### Fixed
+
+- `ProbeRackSlots` with `Strict` and no `Confirm` never confirmed a slot, so nothing was valid. It now defaults to `ConfirmAny`.
+- Built on go-cotp v1.1.1, go-tpkt v1.0.2.
+
+---
+
 ## v0.8.0
 
 **Date:** 2026-10-30
