@@ -18,7 +18,7 @@ None of this is a conformance claim: nothing is certified, no Siemens test has b
 | Linux arm64 | interop run locally, not in CI | snap7-interop images exist for this platform |
 | Linux arm, macOS arm64, Windows amd64 | `make cross` builds without cgo; not in CI | |
 
-The module is pure Go; go-cotp and go-tpkt are its only dependencies.
+The module is pure Go; go-cotp and go-tpkt are its only dependencies, apart from goleak in the tests.
 
 ## Feature support
 

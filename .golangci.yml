@@ -15,3 +15,8 @@ linters:
     - staticcheck
     - unused
     - misspell
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

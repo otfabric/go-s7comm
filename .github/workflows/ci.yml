@@ -22,3 +22,14 @@ jobs:
       codecov-name: go-s7comm
       go-versions: '["1.23", "1.24", "1.25", "1.26"]'
     secrets: inherit
+
+  # go-ci gates the total; this gates each package (COVER_PKG_MIN).
+  coverage-floor:
+    name: Per-package coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+      - run: make coverage-pkg-check

@@ -748,3 +748,21 @@ func BenchmarkProbeRackSlots(b *testing.B) {
 		_, _ = ProbeRackSlots(ctx, req)
 	}
 }
+
+// Strict without Confirm is documented to default to ConfirmAny. The zero
+// value used to stay "", which no strategy handles, so that every candidate
+// ended as valid-connect with "no confirmation strategy".
+func TestApplyProbeDefaultsStrictConfirm(t *testing.T) {
+	for _, confirm := range []ConfirmationKind{"", ConfirmNone} {
+		req := RackSlotProbeRequest{Strict: true, Confirm: confirm}
+		applyProbeDefaults(&req)
+		if req.Confirm != ConfirmAny {
+			t.Errorf("Confirm %q: got %q, want %q", confirm, req.Confirm, ConfirmAny)
+		}
+	}
+	req := RackSlotProbeRequest{Strict: true, Confirm: ConfirmCPUState}
+	applyProbeDefaults(&req)
+	if req.Confirm != ConfirmCPUState {
+		t.Errorf("an explicit strategy became %q", req.Confirm)
+	}
+}

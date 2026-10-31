@@ -340,7 +340,7 @@ func applyProbeDefaults(req *RackSlotProbeRequest) {
 	if req.DelayMS == 0 && mode == SafetyConservative {
 		req.DelayMS = 50
 	}
-	if req.Strict && req.Confirm == ConfirmNone {
+	if req.Strict && (req.Confirm == "" || req.Confirm == ConfirmNone) {
 		req.Confirm = ConfirmAny
 	}
 }

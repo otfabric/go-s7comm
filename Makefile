@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all check test test-race coverage coverage-check cover fuzz cross bench lint lint-ci vuln fmt vet clean test-interop interop
+.PHONY: help all check test test-race coverage coverage-check coverage-pkg-check cover e2e fuzz cross bench lint lint-ci vuln fmt vet clean test-interop interop
 
 # Parent otfabric/go.work may pin older modules; isolate toolchain commands.
 export GOWORK := off
@@ -21,16 +21,22 @@ all: ## Format, vet, and test
 
 # Same value as coverage-min in .github/workflows/ci.yml; raise both together.
 COVER_MIN := 90
+# Per-package floor (TEST-012): the lowest package, client, measures 92.6 %.
+COVER_PKG_MIN := 90
 FUZZTIME ?= 10s
 
 # Build tag for the interop package (excluded from default ./... builds).
 INTEROP_TAGS := interop
 
-check: fmt lint lint-ci vuln vet test coverage ## Run all checks
+check: fmt lint lint-ci vuln vet test coverage-pkg-check ## Run all checks
 
 test: ## Run unit tests with race detector
 	@echo "Running tests"
 	@go test -count=1 -race ./...
+
+e2e: ## Run the end-to-end suite: the client against a simulated PLC on loopback
+	@echo "Running end-to-end tests"
+	@go test -count=1 -race ./e2e/...
 
 test-race: test ## Alias for race-enabled test run
 
@@ -45,6 +51,11 @@ coverage: ## Run tests with coverage (writes coverage.out)
 coverage-check: coverage ## Fail below COVER_MIN (the go-ci coverage-min)
 	@total=$$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%","",$$3); print $$3}'); \
 	awk -v t="$$total" -v m="$(COVER_MIN)" 'BEGIN { if (t+0 < m+0) { printf "coverage %.1f%% < %s%%\n", t, m; exit 1 } else printf "coverage %.1f%% >= %s%%\n", t, m }'
+
+coverage-pkg-check: coverage ## Fail when a package is below COVER_PKG_MIN
+	@awk -v m="$(COVER_PKG_MIN)" 'NR > 1 { n[$$1] = $$2; if ($$3 > 0) h[$$1] = 1 } \
+	END { for (k in n) { p = k; sub(/\/[^\/]*$$/, "", p); s[p] += n[k]; if (k in h) c[p] += n[k] } \
+	for (p in s) { v = 100 * c[p] / s[p]; if (v < m) { printf "%s: %.1f%% < %s%%\n", p, v, m; bad = 1 } } exit bad }' coverage.out
 
 cover: coverage ## Open coverage report in browser
 	@echo "Opening coverage report"
