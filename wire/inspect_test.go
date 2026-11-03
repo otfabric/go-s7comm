@@ -33,7 +33,7 @@ func TestInspectTPDUEmptyDT(t *testing.T) {
 }
 
 func TestInspectTPDUWithS7(t *testing.T) {
-	s7 := EncodeS7Header(ROSCTRJob, 1, 1, 0)
+	s7 := must(EncodeS7Header(ROSCTRJob, 1, 1, 0))
 	s7 = append(s7, FuncReadVar)
 	tpdu := encodeInspectDT(t, s7)
 	s, err := InspectTPDU(tpdu)
@@ -49,7 +49,7 @@ func TestInspectTPDUWithS7(t *testing.T) {
 }
 
 func FuzzInspectTPDU(f *testing.F) {
-	dt := &cotp.DT{EOT: true, UserData: EncodeS7Header(ROSCTRJob, 1, 2, 0)}
+	dt := &cotp.DT{EOT: true, UserData: must(EncodeS7Header(ROSCTRJob, 1, 2, 0))}
 	tpdu, _ := dt.MarshalBinary()
 	f.Add(tpdu)
 	f.Fuzz(func(t *testing.T, tpdu []byte) {

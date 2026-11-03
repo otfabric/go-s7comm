@@ -87,7 +87,10 @@ func performS7Setup(ctx context.Context, conn *cotp.Conn, pduRef uint16, maxAmqC
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	req := wire.EncodeSetupCommRequest(pduRef, maxAmqCalling, maxAmqCalled, maxPDU)
+	req, err := wire.EncodeSetupCommRequest(pduRef, maxAmqCalling, maxAmqCalled, maxPDU)
+	if err != nil {
+		return nil, &ValidationError{Message: err.Error()}
+	}
 	if err := conn.WriteTSDU(ctx, req); err != nil {
 		return nil, err
 	}

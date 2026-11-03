@@ -5,6 +5,7 @@ package wire
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -95,6 +96,9 @@ func ParseBlockListResponse(szlData []byte) ([]BlockListEntry, error) {
 	return entries, nil
 }
 
+// MaxUploadBlockNumber is the largest block number the five-digit upload file name holds.
+const MaxUploadBlockNumber = 99999
+
 // EncodeStartUploadRequest creates a start upload request.
 // An unknown block type returns ErrUnknownBlockType, so a bad type cannot request a different block.
 func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) ([]byte, error) {
@@ -118,6 +122,10 @@ func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) ([]by
 		typeChar = 'F'
 	default:
 		return nil, fmt.Errorf("%w: 0x%02X", ErrUnknownBlockType, blockType)
+	}
+
+	if blockNum < 0 || blockNum > MaxUploadBlockNumber {
+		return nil, fmt.Errorf("%w: block number %d not in 0..%d", ErrOutOfRange, blockNum, MaxUploadBlockNumber)
 	}
 
 	// Parameter header
@@ -145,9 +153,7 @@ func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) ([]by
 	filename[8] = 0x00
 
 	param = append(param, filename...)
-
-	header := EncodeS7Header(ROSCTRJob, pduRef, len(param), 0)
-	return append(header, param...), nil
+	return encodeMessage(ROSCTRJob, pduRef, param, nil)
 }
 
 // ParseStartUploadResponse extracts upload session ID from upload start response parameters.
@@ -164,30 +170,23 @@ func ParseStartUploadResponse(param []byte) (string, error) {
 
 // EncodeUploadRequest requests next upload segment for a started upload session.
 func EncodeUploadRequest(pduRef uint16, sessionID string) []byte {
-	id := []byte(sessionID)
-	if len(id) > 255 {
-		id = id[:255]
-	}
-	param := make([]byte, 9)
-	param[0] = FuncUpload
-	param[8] = byte(len(id))
-	param = append(param, id...)
-	header := EncodeS7Header(ROSCTRJob, pduRef, len(param), 0)
-	return append(header, param...)
+	return uploadSessionRequest(pduRef, FuncUpload, sessionID)
 }
 
 // EncodeEndUploadRequest ends an upload session.
 func EncodeEndUploadRequest(pduRef uint16, sessionID string) []byte {
-	id := []byte(sessionID)
-	if len(id) > 255 {
-		id = id[:255]
-	}
-	param := make([]byte, 9)
-	param[0] = FuncUploadEnd
-	param[8] = byte(len(id))
-	param = append(param, id...)
-	header := EncodeS7Header(ROSCTRJob, pduRef, len(param), 0)
-	return append(header, param...)
+	return uploadSessionRequest(pduRef, FuncUploadEnd, sessionID)
+}
+
+// uploadSessionRequest encodes an Upload or End Upload request. The session ID
+// field is one length byte: a longer ID is cut to 255 bytes.
+func uploadSessionRequest(pduRef uint16, fn byte, sessionID string) []byte {
+	n := min(len(sessionID), math.MaxUint8)
+	param := make([]byte, 9, 9+n)
+	param[0] = fn
+	param[8] = byte(n)
+	param = append(param, sessionID[:n]...)
+	return append(s7Header(ROSCTRJob, pduRef, uint16(9+n), 0), param...)
 }
 
 // UploadChunk is one chunk returned by upload continuation responses.

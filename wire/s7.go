@@ -5,6 +5,7 @@ package wire
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 )
 
 // ROSCTR is the S7 message type (Remote Operating Service Control).
@@ -76,16 +77,50 @@ type S7Header struct {
 
 const S7HeaderSize = 10
 
-// EncodeS7Header creates an S7 protocol header
-func EncodeS7Header(rosctr ROSCTR, pduRef uint16, paramLen, dataLen int) []byte {
+// EncodeS7Header creates an S7 protocol header. paramLen and dataLen must be
+// 0..65535 (ErrOutOfRange otherwise).
+func EncodeS7Header(rosctr ROSCTR, pduRef uint16, paramLen, dataLen int) ([]byte, error) {
+	p, err := checkedUint16("parameter length", paramLen)
+	if err != nil {
+		return nil, err
+	}
+	d, err := checkedUint16("data length", dataLen)
+	if err != nil {
+		return nil, err
+	}
+	return s7Header(rosctr, pduRef, p, d), nil
+}
+
+// checkedUint16 converts v for a 16-bit wire field, or returns ErrOutOfRange naming it.
+func checkedUint16(name string, v int) (uint16, error) {
+	if v < 0 || v > math.MaxUint16 {
+		return 0, fmt.Errorf("%w: %s %d not in 0..%d", ErrOutOfRange, name, v, math.MaxUint16)
+	}
+	return uint16(v), nil
+}
+
+// s7Header encodes a header for lengths the caller has already bounded.
+func s7Header(rosctr ROSCTR, pduRef, paramLen, dataLen uint16) []byte {
 	buf := make([]byte, S7HeaderSize)
 	buf[0] = 0x32 // S7 Protocol ID
 	buf[1] = byte(rosctr)
 	binary.BigEndian.PutUint16(buf[2:4], 0)      // Redundancy ID
 	binary.BigEndian.PutUint16(buf[4:6], pduRef) // PDU Ref
-	binary.BigEndian.PutUint16(buf[6:8], uint16(paramLen))
-	binary.BigEndian.PutUint16(buf[8:10], uint16(dataLen))
+	binary.BigEndian.PutUint16(buf[6:8], paramLen)
+	binary.BigEndian.PutUint16(buf[8:10], dataLen)
 	return buf
+}
+
+// encodeMessage joins header, parameter and data sections into one S7 message.
+func encodeMessage(rosctr ROSCTR, pduRef uint16, param, data []byte) ([]byte, error) {
+	header, err := EncodeS7Header(rosctr, pduRef, len(param), len(data))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, len(header)+len(param)+len(data))
+	out = append(out, header...)
+	out = append(out, param...)
+	return append(out, data...), nil
 }
 
 // ParseS7Header parses an S7 header from data

@@ -32,6 +32,21 @@ func validateAddress(addr model.Address) error {
 	if addr.Area == model.AreaDB && addr.DBNumber < 0 {
 		return &ValidationError{Message: fmt.Sprintf("DB number must be >= 0, got %d", addr.DBNumber)}
 	}
+	if addr.DBNumber < 0 || addr.DBNumber > wire.MaxS7AnyDBNumber {
+		return &ValidationError{Message: fmt.Sprintf("DB number must be 0..%d, got %d", wire.MaxS7AnyDBNumber, addr.DBNumber)}
+	}
+	if addr.Start > wire.MaxS7AnyByteOffset {
+		return &ValidationError{Message: fmt.Sprintf("start offset must be <= %d, got %d", wire.MaxS7AnyByteOffset, addr.Start)}
+	}
+	return nil
+}
+
+// validateRangeEnd checks that n bytes from start stay inside the S7ANY address
+// space; past it the 24-bit start address would wrap to other memory.
+func validateRangeEnd(start, n int) error {
+	if n > wire.MaxS7AnyByteOffset+1-start {
+		return &ValidationError{Message: fmt.Sprintf("range %d+%d ends past the last S7 byte address %d", start, n, wire.MaxS7AnyByteOffset)}
+	}
 	return nil
 }
 
@@ -45,6 +60,9 @@ func validateBitAddress(addr model.BitAddress) error {
 	}
 	if addr.Area == model.AreaDB && addr.DBNumber < 0 {
 		return &ValidationError{Message: fmt.Sprintf("DB number must be >= 0, got %d", addr.DBNumber)}
+	}
+	if err := wire.ValidateS7AnyBitAddress(wire.S7AnyBitAddress{DBNumber: addr.DBNumber, ByteOffset: addr.ByteOffset, BitOffset: addr.BitOffset}); err != nil {
+		return &ValidationError{Message: err.Error()}
 	}
 	if err := wire.ValidateArea(byte(addr.Area)); err != nil {
 		return &ValidationError{Message: err.Error()}

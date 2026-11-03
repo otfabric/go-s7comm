@@ -592,13 +592,13 @@ func ValidateRackSlot(rack, slot int) error
 func BuildTSAP(connType, rack, slot int) (uint16, error)
 ```
 
-- `BuildTSAP`: S7 TSAP from connection type (1=PG, 2=OP, 3=S7Basic), rack (0..7), slot (0..31). Returns `error` when rack/slot are out of range.
+- `BuildTSAP`: S7 TSAP from connection type (1=PG, 2=OP, 3=S7Basic; 0..255), rack (0..7), slot (0..31). Returns `error` when one is out of range.
 - Selectors passed to go-cotp are the two-byte big-endian encoding of these TSAP values.
 
 ### S7 headers
 
 ```go
-func EncodeS7Header(rosctr ROSCTR, pduRef uint16, paramLen, dataLen int) []byte
+func EncodeS7Header(rosctr ROSCTR, pduRef uint16, paramLen, dataLen int) ([]byte, error) // lengths 0..65535
 func ParseS7Header(data []byte) (*S7Header, []byte, error)
 ```
 
@@ -607,24 +607,34 @@ func ParseS7Header(data []byte) (*S7Header, []byte, error)
 ### PDUs
 
 ```go
-func EncodeSetupCommRequest(pduRef uint16, maxAmqCalling, maxAmqCalled, pduSize int) []byte
+func EncodeSetupCommRequest(pduRef uint16, maxAmqCalling, maxAmqCalled, pduSize int) ([]byte, error)
 func ParseSetupCommResponse(data []byte) (*SetupCommResponse, error)
 
-func EncodeS7Any(addr S7AnyAddress) []byte
-func EncodeReadVarRequest(pduRef uint16, addrs []S7AnyAddress) []byte
+const (
+    MaxS7AnyDBNumber   = 65535
+    MaxS7AnyByteOffset = 0x1FFFFF // the start address is a 24-bit bit offset
+    MaxS7AnyCount      = 65535
+    MaxReadVarItems    = 255
+    MaxWriteVarBytes   = 8191     // the data length is 16-bit, in bits
+)
+func ValidateS7AnyAddress(addr S7AnyAddress) error
+func ValidateS7AnyBitAddress(addr S7AnyBitAddress) error
+
+func EncodeS7Any(addr S7AnyAddress) ([]byte, error)
+func EncodeReadVarRequest(pduRef uint16, addrs []S7AnyAddress) ([]byte, error)
 func ParseReadVarResponse(param, data []byte) ([]ReadVarItem, error)
-func EncodeWriteVarRequest(pduRef uint16, addr S7AnyAddress, value []byte) []byte
+func EncodeWriteVarRequest(pduRef uint16, addr S7AnyAddress, value []byte) ([]byte, error)
 func ParseWriteVarResponse(param, data []byte) error
 
 type S7AnyBitAddress struct {
     Area       byte
     DBNumber   int
     ByteOffset int
-    BitOffset  int // 0..7; caller validated
+    BitOffset  int // 0..7
 }
-func EncodeS7AnyBit(addr S7AnyBitAddress) []byte
-func EncodeReadVarBitRequest(pduRef uint16, addr S7AnyBitAddress) []byte
-func EncodeWriteVarBitRequest(pduRef uint16, addr S7AnyBitAddress, value bool) []byte
+func EncodeS7AnyBit(addr S7AnyBitAddress) ([]byte, error)
+func EncodeReadVarBitRequest(pduRef uint16, addr S7AnyBitAddress) ([]byte, error)
+func EncodeWriteVarBitRequest(pduRef uint16, addr S7AnyBitAddress, value bool) ([]byte, error)
 func DecodeAsBit(item ReadVarItem) (bool, error)
 
 func NormalizeResponseDataLength(transportSize ResponseTransportSize, rawLength uint16) (int, error)
@@ -637,12 +647,15 @@ func ParseBlockListResponse(szlData []byte) ([]BlockListEntry, error)
 func ParseBlockInfoResponse(szlData []byte) (BlockInfoData, error)
 func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) ([]byte, error)
 func ParseStartUploadResponse(param []byte) (string, error)
-func EncodeUploadRequest(pduRef uint16, sessionID string) []byte
+const MaxUploadBlockNumber = 99999 // EncodeStartUploadRequest: five-digit file name
+func EncodeUploadRequest(pduRef uint16, sessionID string) []byte // ID cut to 255 bytes
 func EncodeEndUploadRequest(pduRef uint16, sessionID string) []byte
 func ParseUploadResponse(param, data []byte) (*UploadChunk, error)
 ```
 
 `EncodeS7Any` / byte read-write helpers use byte transport size and byte offsets (start address = `Start*8` bits). Bit helpers (`EncodeS7AnyBit`, `EncodeReadVarBitRequest`, `EncodeWriteVarBitRequest`, `DecodeAsBit`) use request S7ANY transport `TransportSizeBit` (`0x01`) with start = `ByteOffset*8+BitOffset` (not multiplied again). Read/Write Var data sections use `DataTransportSizeBit` (`0x03`). Only `SyntaxIDS7Any` is supported for encoding (`ValidateRequestSyntax`).
+
+Request encoders return `ErrOutOfRange` for a value that does not fit its wire field (a DB number above 65535, a start past `MaxS7AnyByteOffset`, more than 255 items, a write over 8191 bytes, a length above 65535) instead of truncating it to another address.
 
 ### Inspection and errors
 
@@ -682,6 +695,7 @@ var (
     ErrTruncatedItemHeader  error
     ErrTruncatedItemPayload error
     ErrUnknownBlockType     error // EncodeStartUploadRequest: unknown block type
+    ErrOutOfRange           error // request encoders: value does not fit its wire field
 )
 ```
 

@@ -8,7 +8,7 @@ import (
 )
 
 func TestEncodeSetupCommRequest(t *testing.T) {
-	got := EncodeSetupCommRequest(1, 2, 2, 480)
+	got := must(EncodeSetupCommRequest(1, 2, 2, 480))
 	if len(got) < 10+8 {
 		t.Fatalf("expected at least 18 bytes (header+param), got %d", len(got))
 	}

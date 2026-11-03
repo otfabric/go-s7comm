@@ -8,7 +8,7 @@ import (
 )
 
 func TestEncodeParseS7Header(t *testing.T) {
-	h := EncodeS7Header(ROSCTRJob, 7, 12, 4)
+	h := must(EncodeS7Header(ROSCTRJob, 7, 12, 4))
 	h = append(h, make([]byte, 16)...)
 	parsed, rest, err := ParseS7Header(h)
 	if err != nil {
@@ -68,8 +68,8 @@ func TestParseS7HeaderAckTooShort(t *testing.T) {
 }
 
 func TestParseS7HeaderPayloadLengthError(t *testing.T) {
-	h := EncodeS7Header(ROSCTRJob, 0, 20, 10) // claims 30 bytes payload
-	h = append(h, make([]byte, 5)...)         // but only 5 bytes
+	h := must(EncodeS7Header(ROSCTRJob, 0, 20, 10)) // claims 30 bytes payload
+	h = append(h, make([]byte, 5)...)               // but only 5 bytes
 	_, _, err := ParseS7Header(h)
 	if err == nil {
 		t.Fatal("expected payload length error")
@@ -142,7 +142,7 @@ func TestFunctionCodeString(t *testing.T) {
 }
 
 func BenchmarkParseS7Header(b *testing.B) {
-	h := EncodeS7Header(ROSCTRJob, 7, 12, 4)
+	h := must(EncodeS7Header(ROSCTRJob, 7, 12, 4))
 	h = append(h, make([]byte, 16)...)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

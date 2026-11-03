@@ -26,6 +26,8 @@ type plc struct {
 
 	// mode changes what the PLC does with the next job.
 	mode atomic.Int32
+	// rewrite, when set, changes each answer to a job before it is sent.
+	rewrite atomic.Pointer[func([]byte) []byte]
 
 	mu   sync.Mutex
 	dbs  map[int][]byte
@@ -117,7 +119,11 @@ func (p *plc) serve(raw net.Conn) {
 				continue
 			}
 		}
-		if conn.WriteTSDU(ctx, p.answer(h, body)) != nil {
+		out := p.answer(h, body)
+		if f := p.rewrite.Load(); f != nil && body[0] != wire.FuncSetupComm {
+			out = (*f)(out)
+		}
+		if conn.WriteTSDU(ctx, out) != nil {
 			return
 		}
 	}
@@ -229,7 +235,7 @@ func (p *plc) szl(ref uint16, data []byte) []byte {
 	out = append(out, payload...)
 
 	param := []byte{0x00, 0x01, 0x12, 0x08, 0x12, 0x84, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00}
-	hdr := wire.EncodeS7Header(wire.ROSCTRUserdata, ref, len(param), len(out))
+	hdr := must(wire.EncodeS7Header(wire.ROSCTRUserdata, ref, len(param), len(out)))
 	return append(append(hdr, param...), out...)
 }
 

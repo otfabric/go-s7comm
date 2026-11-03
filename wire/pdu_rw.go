@@ -168,30 +168,65 @@ type S7AnyAddress struct {
 	Size     int // Number of bytes
 }
 
-// EncodeS7Any encodes an S7Any address specification (syntax SyntaxIDS7Any only).
-// Call ValidateArea(addr.Area) before encoding if area comes from untrusted input.
-// Byte-oriented: Start is a byte offset; Size is a byte count; transport size is BYTE.
-func EncodeS7Any(addr S7AnyAddress) []byte {
+// S7ANY field limits. The start address is a 24-bit bit offset, so the last
+// addressable byte is MaxS7AnyByteOffset; DB number and element count are 16-bit.
+const (
+	MaxS7AnyDBNumber   = math.MaxUint16
+	MaxS7AnyByteOffset = 0xFFFFFF >> 3
+	MaxS7AnyCount      = math.MaxUint16
+	// MaxReadVarItems is the item count limit of one Read Var request (one byte).
+	MaxReadVarItems = math.MaxUint8
+	// MaxWriteVarBytes is the largest Write Var payload: its length is 16-bit, in bits.
+	MaxWriteVarBytes = math.MaxUint16 >> 3
+)
+
+// ValidateS7AnyAddress returns an ErrOutOfRange error when a field does not fit
+// its S7ANY field. It does not check the area: see ValidateArea.
+func ValidateS7AnyAddress(addr S7AnyAddress) error {
+	_, err := EncodeS7Any(addr)
+	return err
+}
+
+// ValidateS7AnyBitAddress is ValidateS7AnyAddress for a one-bit address; BitOffset must be 0..7.
+func ValidateS7AnyBitAddress(addr S7AnyBitAddress) error {
+	_, err := EncodeS7AnyBit(addr)
+	return err
+}
+
+// putS7Any writes the 12-byte S7ANY item for fields ValidateS7Any* accepted.
+func putS7Any(transport byte, count, dbNumber uint16, area byte, startBit uint32) []byte {
 	buf := make([]byte, 12)
 	buf[0] = 0x12 // Var spec
 	buf[1] = 0x0A // Length of following
 	buf[2] = SyntaxIDS7Any
-	buf[3] = TransportSizeByte
-
-	binary.BigEndian.PutUint16(buf[4:6], uint16(addr.Size))
-	binary.BigEndian.PutUint16(buf[6:8], uint16(addr.DBNumber))
-	buf[8] = addr.Area
-
-	// Start address in bits
-	startBit := addr.Start * 8
-	buf[9] = byte(startBit >> 16)
-	buf[10] = byte(startBit >> 8)
-	buf[11] = byte(startBit)
-
+	buf[3] = transport
+	binary.BigEndian.PutUint16(buf[4:6], count)
+	binary.BigEndian.PutUint16(buf[6:8], dbNumber)
+	buf[8] = area
+	buf[9] = byte(startBit >> 16 & 0xFF)
+	buf[10] = byte(startBit >> 8 & 0xFF)
+	buf[11] = byte(startBit & 0xFF)
 	return buf
 }
 
-// S7AnyBitAddress is a single-bit S7ANY address. BitOffset must be 0..7 (caller validated).
+// EncodeS7Any encodes an S7Any address specification (syntax SyntaxIDS7Any only).
+// Call ValidateArea(addr.Area) before encoding if area comes from untrusted input.
+// Byte-oriented: Start is a byte offset; Size is a byte count; transport size is BYTE.
+// A field that does not fit returns ErrOutOfRange (ValidateS7AnyAddress).
+func EncodeS7Any(addr S7AnyAddress) ([]byte, error) {
+	if addr.DBNumber < 0 || addr.DBNumber > MaxS7AnyDBNumber {
+		return nil, fmt.Errorf("%w: DB number %d not in 0..%d", ErrOutOfRange, addr.DBNumber, MaxS7AnyDBNumber)
+	}
+	if addr.Start < 0 || addr.Start > MaxS7AnyByteOffset {
+		return nil, fmt.Errorf("%w: start %d not in 0..%d", ErrOutOfRange, addr.Start, MaxS7AnyByteOffset)
+	}
+	if addr.Size < 0 || addr.Size > MaxS7AnyCount {
+		return nil, fmt.Errorf("%w: size %d not in 0..%d", ErrOutOfRange, addr.Size, MaxS7AnyCount)
+	}
+	return putS7Any(TransportSizeByte, uint16(addr.Size), uint16(addr.DBNumber), addr.Area, uint32(addr.Start)<<3), nil
+}
+
+// S7AnyBitAddress is a single-bit S7ANY address. BitOffset must be 0..7.
 type S7AnyBitAddress struct {
 	Area       byte
 	DBNumber   int
@@ -201,30 +236,29 @@ type S7AnyBitAddress struct {
 
 // EncodeS7AnyBit encodes a one-bit S7ANY address (transport BIT, element count 1).
 // Start is ByteOffset*8+BitOffset (already in bits; not multiplied again).
-func EncodeS7AnyBit(addr S7AnyBitAddress) []byte {
-	buf := make([]byte, 12)
-	buf[0] = 0x12
-	buf[1] = 0x0A
-	buf[2] = SyntaxIDS7Any
-	buf[3] = TransportSizeBit
-	binary.BigEndian.PutUint16(buf[4:6], 1)
-	binary.BigEndian.PutUint16(buf[6:8], uint16(addr.DBNumber))
-	buf[8] = addr.Area
-	startBit := addr.ByteOffset*8 + addr.BitOffset
-	buf[9] = byte(startBit >> 16)
-	buf[10] = byte(startBit >> 8)
-	buf[11] = byte(startBit)
-	return buf
+// A field that does not fit returns ErrOutOfRange (ValidateS7AnyBitAddress).
+func EncodeS7AnyBit(addr S7AnyBitAddress) ([]byte, error) {
+	if addr.DBNumber < 0 || addr.DBNumber > MaxS7AnyDBNumber {
+		return nil, fmt.Errorf("%w: DB number %d not in 0..%d", ErrOutOfRange, addr.DBNumber, MaxS7AnyDBNumber)
+	}
+	if addr.ByteOffset < 0 || addr.ByteOffset > MaxS7AnyByteOffset {
+		return nil, fmt.Errorf("%w: byte offset %d not in 0..%d", ErrOutOfRange, addr.ByteOffset, MaxS7AnyByteOffset)
+	}
+	if addr.BitOffset < 0 || addr.BitOffset > 7 {
+		return nil, fmt.Errorf("%w: bit offset %d not in 0..7", ErrOutOfRange, addr.BitOffset)
+	}
+	startBit := uint32(addr.ByteOffset)<<3 | uint32(addr.BitOffset)
+	return putS7Any(TransportSizeBit, 1, uint16(addr.DBNumber), addr.Area, startBit), nil
 }
 
 // EncodeReadVarBitRequest creates a Read Var request for one bit.
-func EncodeReadVarBitRequest(pduRef uint16, addr S7AnyBitAddress) []byte {
-	param := make([]byte, 2)
-	param[0] = FuncReadVar
-	param[1] = 1
-	param = append(param, EncodeS7AnyBit(addr)...)
-	header := EncodeS7Header(ROSCTRJob, pduRef, len(param), 0)
-	return append(header, param...)
+func EncodeReadVarBitRequest(pduRef uint16, addr S7AnyBitAddress) ([]byte, error) {
+	item, err := EncodeS7AnyBit(addr)
+	if err != nil {
+		return nil, err
+	}
+	param := append([]byte{FuncReadVar, 1}, item...)
+	return encodeMessage(ROSCTRJob, pduRef, param, nil)
 }
 
 // DataTransportSizeBit is the BIT transport size in Read/Write Var data sections (0x03).
@@ -233,24 +267,20 @@ const DataTransportSizeBit = 0x03
 
 // EncodeWriteVarBitRequest creates a Write Var request for one bit using native BIT data transport.
 // Data section: reserved 0x00, transport BIT (0x03), length 1 bit, payload 0x00/0x01.
-func EncodeWriteVarBitRequest(pduRef uint16, addr S7AnyBitAddress, value bool) []byte {
-	param := make([]byte, 2)
-	param[0] = FuncWriteVar
-	param[1] = 1
-	param = append(param, EncodeS7AnyBit(addr)...)
+func EncodeWriteVarBitRequest(pduRef uint16, addr S7AnyBitAddress, value bool) ([]byte, error) {
+	item, err := EncodeS7AnyBit(addr)
+	if err != nil {
+		return nil, err
+	}
+	param := append([]byte{FuncWriteVar, 1}, item...)
 
 	payload := byte(0)
 	if value {
 		payload = 1
 	}
-	data := []byte{0x00, DataTransportSizeBit, 0x00, 0x01, payload}
-	if len(data)%2 != 0 {
-		data = append(data, 0x00)
-	}
-
-	header := EncodeS7Header(ROSCTRJob, pduRef, len(param), len(data))
-	result := append(header, param...)
-	return append(result, data...)
+	// Five bytes, padded to even length.
+	data := []byte{0x00, DataTransportSizeBit, 0x00, 0x01, payload, 0x00}
+	return encodeMessage(ROSCTRJob, pduRef, param, data)
 }
 
 // ReadVarRequestOverhead is the minimum PDU bytes for one read-var item: S7 header (10) + param (2) + S7Any (12).
@@ -259,18 +289,26 @@ const ReadVarRequestOverhead = S7HeaderSize + 2 + 12
 // WriteVarRequestOverhead is the minimum PDU bytes for one write-var item: S7 header (10) + param (2) + S7Any (12) + data header (4).
 const WriteVarRequestOverhead = S7HeaderSize + 2 + 12 + 4
 
-// EncodeReadVarRequest creates a read variable request
-func EncodeReadVarRequest(pduRef uint16, addrs []S7AnyAddress) []byte {
-	param := make([]byte, 2)
+// EncodeReadVarRequest creates a read variable request. More than
+// MaxReadVarItems addresses, or an address ValidateS7AnyAddress rejects,
+// returns ErrOutOfRange.
+func EncodeReadVarRequest(pduRef uint16, addrs []S7AnyAddress) ([]byte, error) {
+	n := len(addrs)
+	if n > MaxReadVarItems {
+		return nil, fmt.Errorf("%w: %d items, at most %d", ErrOutOfRange, n, MaxReadVarItems)
+	}
+	param := make([]byte, 2, 2+12*n)
 	param[0] = FuncReadVar
-	param[1] = byte(len(addrs))
+	param[1] = byte(n)
 
 	for _, addr := range addrs {
-		param = append(param, EncodeS7Any(addr)...)
+		item, err := EncodeS7Any(addr)
+		if err != nil {
+			return nil, err
+		}
+		param = append(param, item...)
 	}
-
-	header := EncodeS7Header(ROSCTRJob, pduRef, len(param), 0)
-	return append(header, param...)
+	return encodeMessage(ROSCTRJob, pduRef, param, nil)
 }
 
 // ReadVarItem represents a single read result. Raw fields are preserved; Data is normalized payload (success only).
@@ -412,27 +450,30 @@ func ParseReadVarResponse(param, data []byte) ([]ReadVarItem, error) {
 	return items, nil
 }
 
-// EncodeWriteVarRequest creates a write variable request
-func EncodeWriteVarRequest(pduRef uint16, addr S7AnyAddress, value []byte) []byte {
-	param := make([]byte, 2)
-	param[0] = FuncWriteVar
-	param[1] = 1 // Item count
-	param = append(param, EncodeS7Any(addr)...)
+// EncodeWriteVarRequest creates a write variable request. A value longer than
+// MaxWriteVarBytes, or an address ValidateS7AnyAddress rejects, returns ErrOutOfRange.
+func EncodeWriteVarRequest(pduRef uint16, addr S7AnyAddress, value []byte) ([]byte, error) {
+	bits := len(value) * 8
+	if bits > math.MaxUint16 {
+		return nil, fmt.Errorf("%w: write of %d bytes, at most %d", ErrOutOfRange, len(value), MaxWriteVarBytes)
+	}
+	item, err := EncodeS7Any(addr)
+	if err != nil {
+		return nil, err
+	}
+	param := append([]byte{FuncWriteVar, 1}, item...) // one item
 
 	// Data
-	data := make([]byte, 4)
-	data[0] = RetCodeSuccess                                    // Return code (reserved)
-	data[1] = 0x04                                              // Transport size (byte/word/dword)
-	binary.BigEndian.PutUint16(data[2:4], uint16(len(value)*8)) // Length in bits
+	data := make([]byte, 4, 4+len(value)+1)
+	data[0] = RetCodeSuccess                            // Return code (reserved)
+	data[1] = 0x04                                      // Transport size (byte/word/dword)
+	binary.BigEndian.PutUint16(data[2:4], uint16(bits)) // Length in bits
 	data = append(data, value...)
 	// Pad to even length
 	if len(data)%2 != 0 {
 		data = append(data, 0x00)
 	}
-
-	header := EncodeS7Header(ROSCTRJob, pduRef, len(param), len(data))
-	result := append(header, param...)
-	return append(result, data...)
+	return encodeMessage(ROSCTRJob, pduRef, param, data)
 }
 
 // ParseWriteVarResponse parses a write variable response
@@ -512,7 +553,7 @@ func DecodeAsInt(item ReadVarItem) (int16, error) {
 	if err != nil {
 		return 0, err
 	}
-	return int16(binary.BigEndian.Uint16(data)), nil
+	return int16(data[0])<<8 | int16(data[1]), nil
 }
 
 // DecodeAsDInt returns the first 4 bytes as big-endian int32.
@@ -521,7 +562,7 @@ func DecodeAsDInt(item ReadVarItem) (int32, error) {
 	if err != nil {
 		return 0, err
 	}
-	return int32(binary.BigEndian.Uint32(data)), nil
+	return int32(data[0])<<24 | int32(data[1])<<16 | int32(data[2])<<8 | int32(data[3]), nil
 }
 
 // DecodeAsReal returns the first 4 bytes as big-endian float32.

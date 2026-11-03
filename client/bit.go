@@ -36,7 +36,10 @@ func (c *Client) ReadBit(ctx context.Context, addr model.BitAddress) (bool, erro
 		BitOffset:  addr.BitOffset,
 	}
 	ref := c.nextPDURef()
-	req := wire.EncodeReadVarBitRequest(ref, bitAddr)
+	req, err := wire.EncodeReadVarBitRequest(ref, bitAddr)
+	if err != nil {
+		return false, &ValidationError{Message: err.Error()}
+	}
 	param, data, err := c.sendReceive(ctx, req, ref)
 	if err != nil {
 		return false, err
@@ -84,7 +87,10 @@ func (c *Client) WriteBit(ctx context.Context, addr model.BitAddress, value bool
 		BitOffset:  addr.BitOffset,
 	}
 	ref := c.nextPDURef()
-	req := wire.EncodeWriteVarBitRequest(ref, bitAddr, value)
+	req, err := wire.EncodeWriteVarBitRequest(ref, bitAddr, value)
+	if err != nil {
+		return &ValidationError{Message: err.Error()}
+	}
 	param, respData, err := c.sendReceive(ctx, req, ref)
 	if err != nil {
 		return err

@@ -5,7 +5,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -291,11 +290,6 @@ func probeS7(ctx context.Context, ip string, port int, opts *discoverOpts) Disco
 	result := DiscoverResult{IP: ip, Port: port}
 	attempts := 0
 
-	var jitterRng *rand.Rand
-	if opts.jitterMS > 0 {
-		jitterRng = rand.New(rand.NewSource(time.Now().UnixNano()))
-	}
-
 	for rack := opts.rackMin; rack <= opts.rackMax; rack++ {
 		for slot := opts.slotMin; slot <= opts.slotMax; slot++ {
 			if opts.maxAttemptsPerHost > 0 && attempts >= opts.maxAttemptsPerHost {
@@ -308,16 +302,13 @@ func probeS7(ctx context.Context, ip string, port int, opts *discoverOpts) Disco
 				result.AbandonedReason = "context_canceled"
 				return result
 			}
-			if opts.jitterMS > 0 && jitterRng != nil {
-				jitter := time.Duration(jitterRng.Intn(opts.jitterMS+1)) * time.Millisecond
-				if jitter > 0 {
-					select {
-					case <-ctx.Done():
-						result.Error = ctx.Err().Error()
-						result.AbandonedReason = "context_canceled"
-						return result
-					case <-time.After(jitter):
-					}
+			if jitter := randomJitter(opts.jitterMS); jitter > 0 {
+				select {
+				case <-ctx.Done():
+					result.Error = ctx.Err().Error()
+					result.AbandonedReason = "context_canceled"
+					return result
+				case <-time.After(jitter):
 				}
 			}
 			if opts.rateMS > 0 {

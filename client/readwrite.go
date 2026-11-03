@@ -69,6 +69,9 @@ func (c *Client) ReadArea(ctx context.Context, addr model.Address) (*ReadResult,
 	if err := validateAddress(addr); err != nil {
 		return nil, err
 	}
+	if err := validateRangeEnd(addr.Start, addr.Size); err != nil {
+		return nil, err
+	}
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()
 
@@ -115,7 +118,10 @@ func (c *Client) ReadArea(ctx context.Context, addr model.Address) (*ReadResult,
 		}
 
 		ref := c.nextPDURef()
-		req := wire.EncodeReadVarRequest(ref, []wire.S7AnyAddress{s7Addr})
+		req, err := wire.EncodeReadVarRequest(ref, []wire.S7AnyAddress{s7Addr})
+		if err != nil {
+			return nil, &ValidationError{Message: err.Error()}
+		}
 		param, data, err := c.sendReceive(ctx, req, ref)
 		if err != nil {
 			return newFailedReadResult(reqLen, err), nil
@@ -149,6 +155,15 @@ func (c *Client) ReadArea(ctx context.Context, addr model.Address) (*ReadResult,
 			return out, nil
 		}
 
+		if len(item.Data) > chunkSize {
+			// More than asked: appending it would move every later byte off its address.
+			out.Status = ReadStatusProtocolErr
+			out.Message = fmt.Sprintf("item returned %d bytes for %d requested", len(item.Data), chunkSize)
+			out.Cause = fmt.Errorf("%s: %w", out.Message, ErrProtocolFailure)
+			out.ReturnedLength = len(result)
+			out.Data = result
+			return out, nil
+		}
 		result = append(result, item.Data...)
 		offset += chunkSize
 	}
@@ -184,6 +199,9 @@ func ClassifyReadOutcome(requested, returned int) ReadStatus {
 // Large payloads are chunked to fit the negotiated PDU size. Invalid address (negative start, negative DB number for DB area) returns an error.
 func (c *Client) WriteArea(ctx context.Context, addr model.Address, data []byte) error {
 	if err := validateAddress(addr); err != nil {
+		return err
+	}
+	if err := validateRangeEnd(addr.Start, len(data)); err != nil {
 		return err
 	}
 	c.reqMu.Lock()
@@ -224,7 +242,10 @@ func (c *Client) WriteArea(ctx context.Context, addr model.Address, data []byte)
 			Size:     len(chunk),
 		}
 		ref := c.nextPDURef()
-		req := wire.EncodeWriteVarRequest(ref, s7Addr, chunk)
+		req, err := wire.EncodeWriteVarRequest(ref, s7Addr, chunk)
+		if err != nil {
+			return &ValidationError{Message: err.Error()}
+		}
 		param, respData, err := c.sendReceive(ctx, req, ref)
 		if err != nil {
 			return err
