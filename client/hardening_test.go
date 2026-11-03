@@ -90,3 +90,29 @@ func TestRandomJitterBounds(t *testing.T) {
 		}
 	}
 }
+
+// An item carrying more bytes than requested is a protocol error, and the
+// result keeps no byte of it: appending it would shift later chunks.
+func TestReadAreaOverlongItem(t *testing.T) {
+	port, cleanup := startFakeBitServer(t, func(pduRef uint16, _ []byte) []byte {
+		// One successful item of 4 bytes for the 2 asked.
+		data := []byte{wire.RetCodeSuccess, 0x04, 0x00, 32, 1, 2, 3, 4}
+		resp := []byte{0x32, byte(wire.ROSCTRAckData), 0, 0, byte(pduRef >> 8), byte(pduRef), 0, 2, 0, byte(len(data)), 0, 0, wire.FuncReadVar, 1}
+		return append(resp, data...)
+	})
+	defer cleanup()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	c := New("127.0.0.1", WithRackSlot(0, 1), WithPort(port))
+	defer func() { _ = c.Close() }()
+	if err := c.Connect(ctx); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	res, err := c.ReadDB(ctx, 1, 0, 2)
+	if err != nil {
+		t.Fatalf("ReadDB: %v", err)
+	}
+	if res.Status != ReadStatusProtocolErr || len(res.Data) != 0 || !errors.Is(res.Err(), ErrProtocolFailure) {
+		t.Errorf("status %s, %d bytes, err %v", res.Status, len(res.Data), res.Err())
+	}
+}
