@@ -26,6 +26,8 @@ type plc struct {
 
 	// mode changes what the PLC does with the next job.
 	mode atomic.Int32
+	// rewrite, when set, changes each answer to a job before it is sent.
+	rewrite atomic.Pointer[func([]byte) []byte]
 
 	mu   sync.Mutex
 	dbs  map[int][]byte
@@ -78,13 +80,11 @@ func (p *plc) accept() {
 			return
 		}
 		p.conns.Store(raw, struct{}{})
-		p.wg.Add(1)
-		go func() {
-			defer p.wg.Done()
+		p.wg.Go(func() {
 			defer p.conns.Delete(raw)
 			defer func() { _ = raw.Close() }()
 			p.serve(raw)
-		}()
+		})
 	}
 }
 
@@ -119,7 +119,11 @@ func (p *plc) serve(raw net.Conn) {
 				continue
 			}
 		}
-		if conn.WriteTSDU(ctx, p.answer(h, body)) != nil {
+		out := p.answer(h, body)
+		if f := p.rewrite.Load(); f != nil && body[0] != wire.FuncSetupComm {
+			out = (*f)(out)
+		}
+		if conn.WriteTSDU(ctx, out) != nil {
 			return
 		}
 	}
@@ -132,10 +136,7 @@ func (p *plc) answer(h *wire.S7Header, body []byte) []byte {
 	}
 	switch param[0] {
 	case wire.FuncSetupComm:
-		size := int(binary.BigEndian.Uint16(param[6:8]))
-		if size > p.pduSize {
-			size = p.pduSize
-		}
+		size := min(int(binary.BigEndian.Uint16(param[6:8])), p.pduSize)
 		out := append([]byte(nil), param...)
 		binary.BigEndian.PutUint16(out[6:8], uint16(size))
 		return ack(h.PDURef, out, nil)
@@ -234,7 +235,7 @@ func (p *plc) szl(ref uint16, data []byte) []byte {
 	out = append(out, payload...)
 
 	param := []byte{0x00, 0x01, 0x12, 0x08, 0x12, 0x84, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00}
-	hdr := wire.EncodeS7Header(wire.ROSCTRUserdata, ref, len(param), len(out))
+	hdr := must(wire.EncodeS7Header(wire.ROSCTRUserdata, ref, len(param), len(out)))
 	return append(append(hdr, param...), out...)
 }
 

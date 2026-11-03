@@ -5,7 +5,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -169,9 +168,7 @@ func Discover(ctx context.Context, cidr string, opts ...DiscoverOption) ([]Disco
 	var wg sync.WaitGroup
 
 	for i := 0; i < dOpts.parallel; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range jobs {
 				r := probeS7(ctx, j.ip, 102, dOpts)
 				select {
@@ -180,7 +177,7 @@ func Discover(ctx context.Context, cidr string, opts ...DiscoverOption) ([]Disco
 				case out <- indexed{j.i, r}:
 				}
 			}
-		}()
+		})
 	}
 
 	go func() {
@@ -241,7 +238,7 @@ func streamCIDR(ctx context.Context, cidr string, send func(ip string) bool) err
 	skipEnds := total > 2
 	ip := make(net.IP, 4)
 	copy(ip, ipnet.IP.Mask(ipnet.Mask))
-	for idx := 0; idx < total; idx++ {
+	for idx := range total {
 		if skipEnds && (idx == 0 || idx == total-1) {
 			if idx == 0 {
 				incIP(ip)
@@ -293,11 +290,6 @@ func probeS7(ctx context.Context, ip string, port int, opts *discoverOpts) Disco
 	result := DiscoverResult{IP: ip, Port: port}
 	attempts := 0
 
-	var jitterRng *rand.Rand
-	if opts.jitterMS > 0 {
-		jitterRng = rand.New(rand.NewSource(time.Now().UnixNano()))
-	}
-
 	for rack := opts.rackMin; rack <= opts.rackMax; rack++ {
 		for slot := opts.slotMin; slot <= opts.slotMax; slot++ {
 			if opts.maxAttemptsPerHost > 0 && attempts >= opts.maxAttemptsPerHost {
@@ -310,16 +302,13 @@ func probeS7(ctx context.Context, ip string, port int, opts *discoverOpts) Disco
 				result.AbandonedReason = "context_canceled"
 				return result
 			}
-			if opts.jitterMS > 0 && jitterRng != nil {
-				jitter := time.Duration(jitterRng.Intn(opts.jitterMS+1)) * time.Millisecond
-				if jitter > 0 {
-					select {
-					case <-ctx.Done():
-						result.Error = ctx.Err().Error()
-						result.AbandonedReason = "context_canceled"
-						return result
-					case <-time.After(jitter):
-					}
+			if jitter := randomJitter(opts.jitterMS); jitter > 0 {
+				select {
+				case <-ctx.Done():
+					result.Error = ctx.Err().Error()
+					result.AbandonedReason = "context_canceled"
+					return result
+				case <-time.After(jitter):
 				}
 			}
 			if opts.rateMS > 0 {

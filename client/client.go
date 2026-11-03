@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -72,13 +73,13 @@ func (c *Client) Connect(ctx context.Context) error {
 	useExplicit := c.opts.useExplicit
 	logger := c.opts.logger
 
-	if port < 0 {
+	if port < 0 || port > 65535 {
 		return &ValidationError{Message: fmt.Sprintf("invalid port: %d", port)}
 	}
 	if timeout < 0 {
 		return &ValidationError{Message: fmt.Sprintf("invalid timeout: %v", timeout)}
 	}
-	if maxPDU < 1 {
+	if maxPDU < 1 || maxPDU > math.MaxUint16 {
 		return &ValidationError{Message: fmt.Sprintf("invalid max PDU: %d", maxPDU)}
 	}
 	if !autoRackSlot {
@@ -199,8 +200,8 @@ func (c *Client) closeConnLocked() error {
 // "no correlation".
 func (c *Client) nextPDURef() uint16 {
 	for {
-		if ref := uint16(atomic.AddUint32(&c.pduRef, 1)); ref != 0 {
-			return ref
+		if ref := atomic.AddUint32(&c.pduRef, 1) & math.MaxUint16; ref != 0 {
+			return uint16(ref)
 		}
 	}
 }

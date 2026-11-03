@@ -83,8 +83,7 @@ func TestProbeRackSlotsValidationTable(t *testing.T) {
 			t.Errorf("case %d: expected validation error", i)
 			continue
 		}
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		if _, ok := errors.AsType[*ValidationError](err); !ok {
 			t.Errorf("case %d: want *ValidationError, got %T: %v", i, err, err)
 		}
 	}
@@ -288,9 +287,9 @@ type recordingLogger struct {
 	errors int
 }
 
-func (r *recordingLogger) Debug(string, ...interface{}) {}
-func (r *recordingLogger) Info(string, ...interface{})  {}
-func (r *recordingLogger) Error(string, ...interface{}) { r.errors++ }
+func (r *recordingLogger) Debug(string, ...any) {}
+func (r *recordingLogger) Info(string, ...any)  {}
+func (r *recordingLogger) Error(string, ...any) { r.errors++ }
 
 func TestPDURefMismatchError_Error(t *testing.T) {
 	err := &PDURefMismatchError{Expected: 1, Got: 9}
@@ -513,8 +512,7 @@ func TestSendReceive_PDURefMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected PDU ref mismatch")
 	}
-	var mismatch *PDURefMismatchError
-	if !errors.As(err, &mismatch) {
+	if _, ok := errors.AsType[*PDURefMismatchError](err); !ok {
 		t.Fatalf("want PDURefMismatchError, got %T: %v", err, err)
 	}
 }
@@ -547,8 +545,7 @@ func TestPerformS7Setup_PDURefMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected setup PDU ref mismatch")
 	}
-	var mismatch *PDURefMismatchError
-	if !errors.As(err, &mismatch) {
+	if _, ok := errors.AsType[*PDURefMismatchError](err); !ok {
 		t.Fatalf("want PDURefMismatchError in chain, got %T: %v", err, err)
 	}
 }
@@ -633,7 +630,7 @@ func TestRunFollowUp_ConfirmAnyFallsThroughToProtection(t *testing.T) {
 		defer func() { _ = srv.Close() }()
 		serveFakeSetup(t, srv, 480)
 		ctx := context.Background()
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			tsdu, err := srv.ReadTSDU(ctx)
 			if err != nil || len(tsdu) < 12 {
 				return

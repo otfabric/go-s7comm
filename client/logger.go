@@ -19,20 +19,20 @@ func NewSlogLogger(h slog.Handler) Logger {
 
 type slogLogger struct{ sl *slog.Logger }
 
-func (l *slogLogger) Debug(msg string, args ...interface{}) {
+func (l *slogLogger) Debug(msg string, args ...any) {
 	l.sl.Debug(fmt.Sprintf(msg, args...))
 }
 
-func (l *slogLogger) Info(msg string, args ...interface{}) {
+func (l *slogLogger) Info(msg string, args ...any) {
 	l.sl.Info(fmt.Sprintf(msg, args...))
 }
 
-func (l *slogLogger) Error(msg string, args ...interface{}) {
+func (l *slogLogger) Error(msg string, args ...any) {
 	l.sl.Error(fmt.Sprintf(msg, args...))
 }
 
 type nopLogger struct{}
 
-func (nopLogger) Debug(string, ...interface{}) {}
-func (nopLogger) Info(string, ...interface{})  {}
-func (nopLogger) Error(string, ...interface{}) {}
+func (nopLogger) Debug(string, ...any) {}
+func (nopLogger) Info(string, ...any)  {}
+func (nopLogger) Error(string, ...any) {}

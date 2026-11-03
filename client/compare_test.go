@@ -152,7 +152,7 @@ func TestCompareRead_TwoCandidatesWithFakeServer(t *testing.T) {
 	}
 
 	go func() {
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			conn, err := ln.Accept()
 			if err != nil {
 				return
@@ -199,15 +199,15 @@ func TestCompareRead_DifferentData(t *testing.T) {
 
 	firstData := []byte{0xAB, 0xCD}
 	secondData := []byte{0x11, 0x22}
-	var connIndex int32
+	var connIndex atomic.Int32
 
 	go func() {
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			conn, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			idx := atomic.AddInt32(&connIndex, 1) - 1
+			idx := connIndex.Add(1) - 1
 			data := firstData
 			if idx == 1 {
 				data = secondData

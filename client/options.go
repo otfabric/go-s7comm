@@ -31,9 +31,9 @@ type options struct {
 // Args follow fmt.Sprintf conventions (e.g. Error("Connect failed: %v", err)).
 // Use NewSlogLogger to adapt a slog.Handler without changing this interface.
 type Logger interface {
-	Debug(msg string, args ...interface{})
-	Info(msg string, args ...interface{})
-	Error(msg string, args ...interface{})
+	Debug(msg string, args ...any)
+	Info(msg string, args ...any)
+	Error(msg string, args ...any)
 }
 
 func defaultOptions() *options {

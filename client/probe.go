@@ -4,9 +4,10 @@ package client
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net"
 	"sync"
 	"time"
@@ -15,9 +16,22 @@ import (
 	"github.com/otfabric/go-s7comm/wire"
 )
 
-// jitterRNG returns a private RNG for jitter in this call (avoids package-global rand for reproducibility).
-func jitterRNG() *rand.Rand {
-	return rand.New(rand.NewSource(time.Now().UnixNano()))
+// maxJitterMS caps a random jitter at one hour, so huge settings neither
+// overflow the duration nor reach the random source as an invalid bound.
+const maxJitterMS = 3_600_000
+
+// randomJitter returns a uniform delay of 0..maxMS milliseconds (capped at
+// maxJitterMS), or 0 when maxMS <= 0. It reads crypto/rand: jitter needs no
+// secrecy, but a scan's timing then cannot be predicted from the clock.
+func randomJitter(maxMS int) time.Duration {
+	if maxMS <= 0 {
+		return 0
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(min(maxMS, maxJitterMS))+1))
+	if err != nil {
+		return 0
+	}
+	return time.Duration(n.Int64()) * time.Millisecond
 }
 
 // SafetyMode tunes discovery/probe for OT network safety (conservative) vs speed (aggressive).
@@ -191,11 +205,6 @@ func ProbeRackSlots(ctx context.Context, req RackSlotProbeRequest) (*RackSlotPro
 	probeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var jitterRng *rand.Rand
-	if req.JitterMS > 0 {
-		jitterRng = jitterRNG()
-	}
-
 	sem := make(chan struct{}, req.Parallelism)
 	var wg sync.WaitGroup
 
@@ -208,14 +217,11 @@ outer:
 		default:
 		}
 
-		if req.JitterMS > 0 && jitterRng != nil {
-			jitter := time.Duration(jitterRng.Intn(req.JitterMS+1)) * time.Millisecond
-			if jitter > 0 {
-				select {
-				case <-probeCtx.Done():
-					break outer
-				case <-time.After(jitter):
-				}
+		if jitter := randomJitter(req.JitterMS); jitter > 0 {
+			select {
+			case <-probeCtx.Done():
+				break outer
+			case <-time.After(jitter):
 			}
 		}
 		if req.DelayMS > 0 && i > 0 {
@@ -235,9 +241,7 @@ outer:
 			break outer
 		case sem <- struct{}{}:
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 
 			c := probeOne(probeCtx, req, rack, slot)
@@ -251,7 +255,7 @@ outer:
 			if validForStop && (req.StopOnFirst || req.StopOnFirstConfirmed) {
 				cancel()
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -470,8 +474,7 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 		if isProbeTimeout(err) {
 			c.Status = StatusTimeout
 		} else {
-			var s7Err *wire.S7Error
-			if errors.As(err, &s7Err) {
+			if _, ok := errors.AsType[*wire.S7Error](err); ok {
 				c.Status = StatusRejected
 			} else {
 				c.Status = StatusCOTPOnly

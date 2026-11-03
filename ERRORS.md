@@ -99,7 +99,7 @@ func (r *ReadResult) Err() error    // nil | ErrNilReadResult | *ReadOutcomeErro
 | `rejected` | Target returned an S7 item/header error (`ReturnCode` set when item-level) |
 | `timeout` | Context or network timeout |
 | `transport-error` | Connection or send/receive failure (includes not connected) |
-| `protocol-error` | COTP/S7 parse, PDU size, or framing error |
+| `protocol-error` | COTP/S7 parse, PDU size, or framing error; also a Read Var item with more bytes than requested |
 | `inconclusive` | Mixed results across retries/repeats (range probe) |
 
 **Stability:** Treat `Status` (and `ReturnCode` when rejected) as the machine-readable contract. `Message` is descriptive only. `Cause` is optional and may be joined; use `errors.Is` / `errors.As`, not exact join shape.
@@ -156,6 +156,7 @@ Helpers: `HeaderErrorString`, `ItemReturnCodeString`, `ErrClassString`, `ParamEr
 | `ErrInvalidParamLength` | Reserved: exported, but no function in this module returns it today |
 | `ErrInvalidDataLength` | Reserved: exported, but no function in this module returns it today |
 | `ErrUnknownBlockType` | `EncodeStartUploadRequest` input |
+| `ErrOutOfRange` | Request encoder input that does not fit its wire field (`EncodeS7Header`, `EncodeS7Any`, `EncodeS7AnyBit`, Read/Write Var and Setup Communication encoders, `EncodeStartUploadRequest` block number). The client checks the same limits first and returns `*ValidationError` |
 
 COTP/TPKT transport errors come from [go-cotp](https://github.com/otfabric/go-cotp) / [go-tpkt](https://github.com/otfabric/go-tpkt), not this module.
 

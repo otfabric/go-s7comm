@@ -43,7 +43,10 @@ func DecodeWord(data []byte) uint16 {
 
 // DecodeInt decodes a signed 16-bit value (big-endian)
 func DecodeInt(data []byte) int16 {
-	return int16(DecodeWord(data))
+	if len(data) < 2 {
+		return 0
+	}
+	return int16(data[0])<<8 | int16(data[1])
 }
 
 // DecodeDWord decodes an unsigned 32-bit value (big-endian)
@@ -56,7 +59,10 @@ func DecodeDWord(data []byte) uint32 {
 
 // DecodeDInt decodes a signed 32-bit value (big-endian)
 func DecodeDInt(data []byte) int32 {
-	return int32(DecodeDWord(data))
+	if len(data) < 4 {
+		return 0
+	}
+	return int32(data[0])<<24 | int32(data[1])<<16 | int32(data[2])<<8 | int32(data[3])
 }
 
 // DecodeReal decodes a 32-bit float (big-endian IEEE 754)
@@ -99,7 +105,7 @@ func EncodeWord(val uint16) []byte {
 
 // EncodeInt encodes a signed 16-bit value (big-endian)
 func EncodeInt(val int16) []byte {
-	return EncodeWord(uint16(val))
+	return []byte{byte(val >> 8 & 0xFF), byte(val & 0xFF)}
 }
 
 // EncodeDWord encodes an unsigned 32-bit value (big-endian)
@@ -111,7 +117,7 @@ func EncodeDWord(val uint32) []byte {
 
 // EncodeDInt encodes a signed 32-bit value (big-endian)
 func EncodeDInt(val int32) []byte {
-	return EncodeDWord(uint32(val))
+	return []byte{byte(val >> 24 & 0xFF), byte(val >> 16 & 0xFF), byte(val >> 8 & 0xFF), byte(val & 0xFF)}
 }
 
 // EncodeReal encodes a 32-bit float (big-endian IEEE 754)
@@ -128,13 +134,11 @@ func EncodeString(val string, maxLen int) []byte {
 		maxLen = 256
 	}
 
-	maxChars := maxLen - 2
-	if len(val) > maxChars {
-		val = val[:maxChars]
-	}
+	maxChars := maxLen - 2 // 0..254
+	n := min(len(val), maxChars)
 	buf := make([]byte, maxLen)
 	buf[0] = byte(maxChars) // Max length
-	buf[1] = byte(len(val)) // Actual length
-	copy(buf[2:], val)
+	buf[1] = byte(n)        // Actual length
+	copy(buf[2:], val[:n])
 	return buf
 }

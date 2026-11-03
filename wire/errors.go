@@ -17,6 +17,9 @@ var (
 	ErrInvalidParamLength   = errors.New("invalid parameter section length")
 	ErrInvalidDataLength    = errors.New("invalid data section length")
 	ErrUnknownBlockType     = errors.New("unknown block type")
+	// ErrOutOfRange: an encoder input does not fit its wire field. Encoders
+	// return it instead of truncating, which would address other memory.
+	ErrOutOfRange = errors.New("value out of range for its wire field")
 )
 
 // S7 Error classes

@@ -10,7 +10,7 @@ import (
 
 func TestEncodeReadVarRequest(t *testing.T) {
 	addrs := []S7AnyAddress{{Area: AreaDB, DBNumber: 1, Start: 0, Size: 4}}
-	msg := EncodeReadVarRequest(1, addrs)
+	msg := must(EncodeReadVarRequest(1, addrs))
 	if len(msg) < 14 {
 		t.Fatalf("unexpected message length: %d", len(msg))
 	}
@@ -392,7 +392,7 @@ func TestParseWriteVarResponse(t *testing.T) {
 func TestEncodeWriteVarRequest(t *testing.T) {
 	addr := S7AnyAddress{Area: AreaDB, DBNumber: 1, Start: 0, Size: 4}
 	value := []byte{0x01, 0x02, 0x03, 0x04}
-	msg := EncodeWriteVarRequest(1, addr, value)
+	msg := must(EncodeWriteVarRequest(1, addr, value))
 	if len(msg) < 14 {
 		t.Fatalf("unexpected message length: %d", len(msg))
 	}
@@ -400,7 +400,7 @@ func TestEncodeWriteVarRequest(t *testing.T) {
 		t.Fatalf("expected write var function at parameter start")
 	}
 	// Odd-length value gets padded
-	msg2 := EncodeWriteVarRequest(1, addr, []byte{0x01, 0x02, 0x03})
+	msg2 := must(EncodeWriteVarRequest(1, addr, []byte{0x01, 0x02, 0x03}))
 	if len(msg2)%2 != 0 {
 		t.Fatalf("expected even length for padded message, got %d", len(msg2))
 	}
@@ -419,7 +419,7 @@ func TestEncodeS7AnyBit(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			b := EncodeS7AnyBit(tt.addr)
+			b := must(EncodeS7AnyBit(tt.addr))
 			if len(b) != 12 {
 				t.Fatalf("len=%d, want 12", len(b))
 			}
@@ -446,7 +446,7 @@ func TestEncodeS7AnyBit(t *testing.T) {
 
 func TestEncodeReadVarBitRequest(t *testing.T) {
 	addr := S7AnyBitAddress{Area: AreaDB, DBNumber: 1, ByteOffset: 10, BitOffset: 3}
-	msg := EncodeReadVarBitRequest(7, addr)
+	msg := must(EncodeReadVarBitRequest(7, addr))
 	if msg[10] != FuncReadVar {
 		t.Fatalf("function=0x%02X", msg[10])
 	}
@@ -454,7 +454,7 @@ func TestEncodeReadVarBitRequest(t *testing.T) {
 		t.Fatalf("item count=%d", msg[11])
 	}
 	spec := msg[12:24]
-	want := EncodeS7AnyBit(addr)
+	want := must(EncodeS7AnyBit(addr))
 	for i := range want {
 		if spec[i] != want[i] {
 			t.Fatalf("S7ANY mismatch at %d: got %v want %v", i, spec, want)
@@ -465,7 +465,7 @@ func TestEncodeReadVarBitRequest(t *testing.T) {
 func TestEncodeWriteVarBitRequest(t *testing.T) {
 	addr := S7AnyBitAddress{Area: AreaDB, DBNumber: 1, ByteOffset: 0, BitOffset: 0}
 	for _, value := range []bool{false, true} {
-		msg := EncodeWriteVarBitRequest(1, addr, value)
+		msg := must(EncodeWriteVarBitRequest(1, addr, value))
 		if msg[10] != FuncWriteVar {
 			t.Fatalf("value=%v function=0x%02X", value, msg[10])
 		}

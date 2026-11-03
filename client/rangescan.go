@@ -119,12 +119,9 @@ func (c *Client) ProbeReadableRanges(ctx context.Context, req RangeProbeRequest)
 func (c *Client) probeOneOffset(ctx context.Context, req RangeProbeRequest, offset, probeSize int) ReadProbeObservation {
 	addr := model.Address{Area: req.Area, DBNumber: req.DBNumber, Start: offset, Size: probeSize}
 
-	repeat := req.Repeat
-	if repeat < 1 {
-		repeat = 1
-	}
+	repeat := max(req.Repeat, 1)
 	var repeated []*ReadResult
-	for r := 0; r < repeat; r++ {
+	for r := range repeat {
 		if err := ctx.Err(); err != nil {
 			obs := ReadProbeObservation{Offset: offset, Request: addr, Result: *newFailedReadResult(probeSize, err)}
 			return obs

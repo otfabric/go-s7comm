@@ -1,5 +1,36 @@
 # go-s7comm Releases
 
+## v0.9.0
+
+**Date:** 2026-11-03
+**Previous release:** v0.8.1
+
+### Breaking changes
+
+- Go 1.26 minimum (was 1.23). CI tests Go 1.26 and 1.27.
+- `wire` request encoders return `([]byte, error)`: `EncodeS7Header`, `EncodeS7Any`, `EncodeS7AnyBit`, `EncodeReadVarRequest`, `EncodeReadVarBitRequest`, `EncodeWriteVarRequest`, `EncodeWriteVarBitRequest`, `EncodeSetupCommRequest`. A value that does not fit its wire field returns the new `wire.ErrOutOfRange`; before, it was truncated without notice.
+- The client refuses, with `*ValidationError`, addresses it used to truncate: a DB number outside 0..65535 (for every area, not only DB), a start or bit byte offset past 2097151 (`wire.MaxS7AnyByteOffset`, the last byte a 24-bit S7ANY bit address reaches), a read or write that runs past that byte, a max PDU above 65535 and a port above 65535.
+
+### Fixed
+
+- A DB number above 65535 or an offset past the 24-bit S7ANY start address wrapped to a different address, so `WriteDB(65537, …)` wrote DB 1. Both are now refused.
+- `ReadArea` and its helpers accepted a Read Var item that carried more bytes than requested. The extra bytes shifted every later chunk to the wrong offset in `Data`. Such an answer is now `protocol-error`.
+- `ProbeRackSlots` and `Discover` panicked when `JitterMS` was `math.MaxInt`. Jitter now comes from `crypto/rand` and is capped at one hour.
+- `wire.EncodeStartUploadRequest` built a garbage file name for a negative block number or one above 99999. It now returns `ErrOutOfRange`.
+- `wire.BuildTSAP` wrapped a connection type above 255. It now returns an error.
+- gosec G115 and G404: all 35 findings fixed in code, with no suppressions.
+
+### Added
+
+- `wire.ErrOutOfRange`, `wire.ValidateS7AnyAddress`, `wire.ValidateS7AnyBitAddress` and the limits `MaxS7AnyDBNumber`, `MaxS7AnyByteOffset`, `MaxS7AnyCount`, `MaxReadVarItems`, `MaxWriteVarBytes` and `MaxUploadBlockNumber`.
+- Tests: a hostile-PLC chaos test (`e2e/hostile_test.go`) and boundary tests for every encoder. New fuzz targets: `FuzzEncodeS7Any`, `FuzzEncodeWriteVarRequest`, `FuzzParseSetupCommResponse`, `FuzzParseWriteVarResponse`, `FuzzParseStartUploadResponse`, `FuzzParseBlockResponses`, `FuzzSignedRoundTrip` and `FuzzEncodeString`.
+
+### Changed
+
+- Built on go-cotp v1.2.0 and go-tpkt v1.1.0. Code modernised with `go fix`.
+
+---
+
 ## v0.8.1
 
 **Date:** 2026-10-31

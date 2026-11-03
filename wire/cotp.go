@@ -25,11 +25,15 @@ func ValidateRackSlot(rack, slot int) error {
 }
 
 // BuildTSAP creates a TSAP from connection type, rack, and slot (S7 convention).
-// Connection type: 1=PG, 2=OP, 3=S7Basic. Rack must be 0..7, slot 0..31; returns error if out of range.
+// Connection type: 1=PG, 2=OP, 3=S7Basic (0..255). Rack must be 0..7, slot 0..31; returns error if out of range.
 func BuildTSAP(connType, rack, slot int) (uint16, error) {
 	if err := ValidateRackSlot(rack, slot); err != nil {
 		return 0, err
 	}
-	low := EncodeRackSlotTSAP(byte(rack), byte(slot))
+	if connType < 0 || connType > 0xFF {
+		return 0, fmt.Errorf("connection type must be 0..255, got %d", connType)
+	}
+	// ValidateRackSlot bounded rack and slot; the masks state it for the conversion.
+	low := EncodeRackSlotTSAP(byte(rack&0x07), byte(slot&0x1F))
 	return uint16(connType)<<8 | uint16(low), nil
 }

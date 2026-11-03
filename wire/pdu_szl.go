@@ -109,8 +109,8 @@ func EncodeSZLRequest(pduRef, szlID, szlIndex uint16) []byte {
 	binary.BigEndian.PutUint16(data[4:6], szlID)
 	binary.BigEndian.PutUint16(data[6:8], szlIndex)
 
-	header := EncodeS7Header(ROSCTRUserdata, pduRef, len(param), len(data))
-	result := append(header, param...)
+	// Both sections are 8 bytes.
+	result := append(s7Header(ROSCTRUserdata, pduRef, 8, 8), param...)
 	return append(result, data...)
 }
 

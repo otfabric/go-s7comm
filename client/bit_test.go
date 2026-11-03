@@ -50,7 +50,6 @@ func startFakeBitServer(t *testing.T, handle func(pduRef uint16, req []byte) []b
 
 func TestReadBitTrueFalse(t *testing.T) {
 	for _, want := range []bool{false, true} {
-		want := want
 		port, cleanup := startFakeBitServer(t, func(pduRef uint16, req []byte) []byte {
 			if req[10] != wire.FuncReadVar {
 				t.Errorf("expected Read Var, got 0x%02X", req[10])
@@ -84,7 +83,6 @@ func TestReadBitTrueFalse(t *testing.T) {
 
 func TestWriteBitTrueFalse(t *testing.T) {
 	for _, value := range []bool{false, true} {
-		value := value
 		var sawPayload byte
 		port, cleanup := startFakeBitServer(t, func(pduRef uint16, req []byte) []byte {
 			if req[10] != wire.FuncWriteVar {
@@ -167,8 +165,7 @@ func TestValidateBitAddress(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s: expected validation error", tt.name)
 		}
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		if _, ok := errors.AsType[*ValidationError](err); !ok {
 			t.Fatalf("%s: expected ValidationError, got %T %v", tt.name, err, err)
 		}
 		if err := c.WriteBit(ctx, tt.addr, true); err == nil {
