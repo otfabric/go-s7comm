@@ -4,7 +4,7 @@
 
 | Tier | Command | Prerequisites | CI |
 |---|---|---|---|
-| Unit, with race detector | `make test` | none; tests use a fake server, no PLC | `ci.yml` (go-ci), Go 1.23 to 1.26 |
+| Unit, with race detector | `make test` | none; tests use a fake server, no PLC | `ci.yml` (go-ci), Go 1.26 and 1.27 |
 | End-to-end | `make e2e` | none; also part of `make test` | `ci.yml` (go-ci) |
 | Coverage gate | `make coverage-check` | none | `ci.yml` (go-ci `coverage-min`) |
 | Per-package coverage floor | `make coverage-pkg-check` | none | `ci.yml` (`Per-package coverage`) |

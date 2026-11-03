@@ -178,10 +178,10 @@ func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (
 	var payload bytes.Buffer
 	chunkCount := 0
 	done := false
-	for i := 0; i < maxUploadChunks; i++ {
+	for i := range maxUploadChunks {
 		var chunk *wire.UploadChunk
 		var lastErr error
-		for attempt := 0; attempt < maxUploadRetries; attempt++ {
+		for range maxUploadRetries {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}

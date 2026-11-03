@@ -268,6 +268,6 @@ func TestConnectInvalidOptions(t *testing.T) {
 
 type mockLogger struct{}
 
-func (m *mockLogger) Debug(msg string, args ...interface{}) {}
-func (m *mockLogger) Info(msg string, args ...interface{})  {}
-func (m *mockLogger) Error(msg string, args ...interface{}) {}
+func (m *mockLogger) Debug(msg string, args ...any) {}
+func (m *mockLogger) Info(msg string, args ...any)  {}
+func (m *mockLogger) Error(msg string, args ...any) {}

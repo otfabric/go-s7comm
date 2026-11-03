@@ -22,8 +22,7 @@ func TestReadAreaInvalidAddress(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for negative DBNumber")
 	}
-	var ve *ValidationError
-	if !errors.As(err, &ve) {
+	if _, ok := errors.AsType[*ValidationError](err); !ok {
 		t.Errorf("expected ValidationError, got %T", err)
 	}
 	_, err = c.ReadArea(ctx, model.Address{Area: model.AreaDB, DBNumber: 1, Start: -1, Size: 4})

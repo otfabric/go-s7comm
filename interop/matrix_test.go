@@ -33,11 +33,9 @@ func TestSnapInteropMatrix(t *testing.T) {
 	h := newHarness(t)
 
 	for _, fx := range fixtures {
-		fx := fx
 		t.Run(fx.ID, func(t *testing.T) {
 			h.restartWithFixture(t, fx.Filename)
 			for _, srv := range h.servers {
-				srv := srv
 				t.Run(srv.Name, func(t *testing.T) {
 					runFixtureAgainst(t, "127.0.0.1", srv.HostPort, fx.Rack, fx.Slot, fx)
 				})

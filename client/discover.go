@@ -169,9 +169,7 @@ func Discover(ctx context.Context, cidr string, opts ...DiscoverOption) ([]Disco
 	var wg sync.WaitGroup
 
 	for i := 0; i < dOpts.parallel; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range jobs {
 				r := probeS7(ctx, j.ip, 102, dOpts)
 				select {
@@ -180,7 +178,7 @@ func Discover(ctx context.Context, cidr string, opts ...DiscoverOption) ([]Disco
 				case out <- indexed{j.i, r}:
 				}
 			}
-		}()
+		})
 	}
 
 	go func() {
@@ -241,7 +239,7 @@ func streamCIDR(ctx context.Context, cidr string, send func(ip string) bool) err
 	skipEnds := total > 2
 	ip := make(net.IP, 4)
 	copy(ip, ipnet.IP.Mask(ipnet.Mask))
-	for idx := 0; idx < total; idx++ {
+	for idx := range total {
 		if skipEnds && (idx == 0 || idx == total-1) {
 			if idx == 0 {
 				incIP(ip)

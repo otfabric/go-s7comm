@@ -29,7 +29,7 @@ func TestReadAreaConcurrent(t *testing.T) {
 	const concurrency = 8
 	var wg sync.WaitGroup
 	results := make([]*ReadResult, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

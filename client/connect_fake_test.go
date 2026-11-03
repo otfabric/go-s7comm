@@ -71,7 +71,7 @@ func TestConnectWithFakeServer(t *testing.T) {
 			_ = srv.WriteTSDU(ctx, writeResp)
 		}
 		// 6 & 7. SZL requests (Identify sends two: ModuleID and ComponentID)
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			tsdu, err = srv.ReadTSDU(ctx)
 			if err != nil {
 				return
@@ -84,7 +84,7 @@ func TestConnectWithFakeServer(t *testing.T) {
 			}
 		}
 		// 8 & 8b. ProbeReadableRanges single offset with Repeat=2 (two read responses)
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			tsdu, err = srv.ReadTSDU(ctx)
 			if err != nil {
 				return
@@ -95,7 +95,7 @@ func TestConnectWithFakeServer(t *testing.T) {
 			}
 		}
 		// 9 & 10. ReadOutputs and ReadMerkers (two more read responses)
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			tsdu, err = srv.ReadTSDU(ctx)
 			if err != nil {
 				return

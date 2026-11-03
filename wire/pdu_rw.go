@@ -399,7 +399,7 @@ func ParseReadVarResponse(param, data []byte) ([]ReadVarItem, error) {
 	items := make([]ReadVarItem, 0, itemCount)
 	offset := 0
 
-	for i := 0; i < itemCount; i++ {
+	for i := range itemCount {
 		isLast := i == itemCount-1
 		item, next, err := decodeReadResponseItem(data, offset, isLast)
 		if err != nil {

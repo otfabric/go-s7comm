@@ -235,9 +235,7 @@ outer:
 			break outer
 		case sem <- struct{}{}:
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 
 			c := probeOne(probeCtx, req, rack, slot)
@@ -251,7 +249,7 @@ outer:
 			if validForStop && (req.StopOnFirst || req.StopOnFirstConfirmed) {
 				cancel()
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -470,8 +468,7 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 		if isProbeTimeout(err) {
 			c.Status = StatusTimeout
 		} else {
-			var s7Err *wire.S7Error
-			if errors.As(err, &s7Err) {
+			if _, ok := errors.AsType[*wire.S7Error](err); ok {
 				c.Status = StatusRejected
 			} else {
 				c.Status = StatusCOTPOnly

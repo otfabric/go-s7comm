@@ -114,10 +114,7 @@ func executeExpectation(ctx context.Context, c **client.Client, host string, por
 }
 
 func executeConcurrentRead(ctx context.Context, host string, port, rack, slot int, exp Expectation) error {
-	n := exp.Clients
-	if n < 2 {
-		n = 2
-	}
+	n := max(exp.Clients, 2)
 	length := exp.Length
 	if length == 0 && exp.HasBytes {
 		length = len(exp.WantBytes)
@@ -286,8 +283,7 @@ func classifyWriteError(err error) Outcome {
 	if err == nil {
 		return OutcomeSuccess
 	}
-	var s7err *wire.S7Error
-	if errors.As(err, &s7err) {
+	if s7err, ok := errors.AsType[*wire.S7Error](err); ok {
 		return mapItemReturnCode(s7err.Code)
 	}
 	return classifyTransportOrProtocol(err)
@@ -300,8 +296,7 @@ func classifyTransportOrProtocol(err error) Outcome {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return OutcomeTransportFailure
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
+	if _, ok := errors.AsType[net.Error](err); ok {
 		return OutcomeTransportFailure
 	}
 	return OutcomeProtocolFailure

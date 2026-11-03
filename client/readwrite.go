@@ -28,8 +28,7 @@ func classifyOpError(err error) ReadStatus {
 	if errors.Is(err, ErrNotConnected) {
 		return ReadStatusTransportErr
 	}
-	var s7Err *wire.S7Error
-	if errors.As(err, &s7Err) {
+	if _, ok := errors.AsType[*wire.S7Error](err); ok {
 		return ReadStatusRejected
 	}
 	if errors.Is(err, wire.ErrShortS7Header) || errors.Is(err, wire.ErrInvalidS7ProtocolID) ||
@@ -73,10 +72,7 @@ func (c *Client) ReadArea(ctx context.Context, addr model.Address) (*ReadResult,
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()
 
-	reqLen := addr.Size
-	if reqLen < 0 {
-		reqLen = 0
-	}
+	reqLen := max(addr.Size, 0)
 	out := &ReadResult{
 		RequestedLength: reqLen,
 		ReturnedLength:  0,
@@ -299,10 +295,7 @@ func planReadChunks(total, maxChunk int) []int {
 	out := make([]int, 0, (total/maxChunk)+1)
 	remaining := total
 	for remaining > 0 {
-		n := remaining
-		if n > maxChunk {
-			n = maxChunk
-		}
+		n := min(remaining, maxChunk)
 		out = append(out, n)
 		remaining -= n
 	}

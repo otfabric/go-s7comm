@@ -79,9 +79,7 @@ func startScriptedPeer(t *testing.T, setup func(pduRef uint16) []byte, op func(p
 		}
 	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			raw, err := ln.Accept()
 			if err != nil {
@@ -90,7 +88,7 @@ func startScriptedPeer(t *testing.T, setup func(pduRef uint16) []byte, op func(p
 			wg.Add(1)
 			go serve(raw)
 		}
-	}()
+	})
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
@@ -367,7 +365,7 @@ func TestClose_IsIdempotentAndEndsSession(t *testing.T) {
 	port := startScriptedPeer(t, nil, nil)
 	c := connectScripted(t, port)
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if err := c.Close(); err != nil {
 			t.Fatalf("Close %d: %v", i+1, err)
 		}

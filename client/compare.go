@@ -98,9 +98,7 @@ func CompareRead(ctx context.Context, req CompareReadRequest) (*CompareReadResul
 		}
 		idx := i
 		cand := cand
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			c := New(req.Address, WithPort(port), WithRackSlot(cand.Rack, cand.Slot), WithTimeout(timeout))
 			if err := c.Connect(ctx); err != nil {
@@ -115,7 +113,7 @@ func CompareRead(ctx context.Context, req CompareReadRequest) (*CompareReadResul
 				return
 			}
 			results[idx] = CompareReadCandidate{Rack: cand.Rack, Slot: cand.Slot, Result: *res}
-		}()
+		})
 	}
 wait:
 	wg.Wait()

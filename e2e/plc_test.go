@@ -78,13 +78,11 @@ func (p *plc) accept() {
 			return
 		}
 		p.conns.Store(raw, struct{}{})
-		p.wg.Add(1)
-		go func() {
-			defer p.wg.Done()
+		p.wg.Go(func() {
 			defer p.conns.Delete(raw)
 			defer func() { _ = raw.Close() }()
 			p.serve(raw)
-		}()
+		})
 	}
 }
 
@@ -132,10 +130,7 @@ func (p *plc) answer(h *wire.S7Header, body []byte) []byte {
 	}
 	switch param[0] {
 	case wire.FuncSetupComm:
-		size := int(binary.BigEndian.Uint16(param[6:8]))
-		if size > p.pduSize {
-			size = p.pduSize
-		}
+		size := min(int(binary.BigEndian.Uint16(param[6:8])), p.pduSize)
 		out := append([]byte(nil), param...)
 		binary.BigEndian.PutUint16(out[6:8], uint16(size))
 		return ack(h.PDURef, out, nil)

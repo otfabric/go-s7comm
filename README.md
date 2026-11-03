@@ -1,6 +1,6 @@
 # otfabric/go-s7comm - Siemens S7 Protocol Library for Go
 
-[![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/otfabric/go-s7comm.svg)](https://pkg.go.dev/github.com/otfabric/go-s7comm)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/otfabric/go-s7comm/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/go-s7comm/actions/workflows/ci.yml)
@@ -64,7 +64,7 @@ session. Logging is silent by default; see [OBSERVABILITY.md](OBSERVABILITY.md).
 go get github.com/otfabric/go-s7comm
 ```
 
-Requires Go 1.23 or later.
+Requires Go 1.26 or later.
 
 ## Project structure
 

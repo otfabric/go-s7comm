@@ -144,8 +144,7 @@ func TestRefusedAddresses(t *testing.T) {
 	}
 
 	err = c.WriteDB(ctx, 99, 0, []byte{1, 2})
-	var s7Err *wire.S7Error
-	if !errors.As(err, &s7Err) {
+	if _, ok := errors.AsType[*wire.S7Error](err); !ok {
 		t.Errorf("WriteDB to a DB that does not exist: %v", err)
 	}
 
@@ -296,7 +295,7 @@ func TestConcurrentUseOfOneClient(t *testing.T) {
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	errs := make(chan error, 16)
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
