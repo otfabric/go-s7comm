@@ -272,7 +272,7 @@ go func() { _ = srv.ListenAndServe(ctx, "127.0.0.1:1102") }()
 defer srv.Close()
 ```
 
-It answers Setup Communication, Read Var and Write Var (S7ANY items) with the item return codes and header errors Siemens defines (as Wireshark's s7comm dissector lists them): object does not exist `0x0A`, invalid address `0x05`, data type not supported `0x06`, data type inconsistent `0x07`, a write to a read-only area: accessing the object not allowed `0x03`. An answer larger than the PDU is refused with header error `0x8500`; other jobs and user data get `0x8104` (service not implemented); a PDU whose header cannot be read closes the connection. Details: [API.md](API.md#server), limits: [LIMITATIONS.md](LIMITATIONS.md).
+It answers Setup Communication, Read Var and Write Var (S7ANY items) with the item return codes and header errors Siemens defines (as Wireshark's s7comm dissector lists them): object does not exist `0x0A`, invalid address `0x05`, data type not supported `0x06`, data type inconsistent `0x07`, a write to a read-only area: accessing the object not allowed `0x03` (Siemens 03H "Object access is not allowed"; Snap7-based servers send `0x0A` here, see [ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors)). An answer larger than the PDU is refused with header error `0x8500`; other jobs and user data get `0x8104` (service not implemented); a PDU whose header cannot be read closes the connection. Details: [API.md](API.md#server), limits: [LIMITATIONS.md](LIMITATIONS.md).
 
 ## Development
 

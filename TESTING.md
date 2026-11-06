@@ -42,7 +42,7 @@ CI runs on Linux only. See [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md#platf
 | `SNAP_INTEROP_OTFABRIC_IMAGE` | Adds `otfabric`, go-s7comm's own server as snap7-interop publishes it (`ghcr.io/otfabric/snap7-interop-otfabric`). Never set by default; not a reference |
 | `SNAP_INTEROP_SERVERS=otfabric` | Run only the named servers (comma-separated) |
 
-The **Self-interop** workflow (manual, never required) runs this commit's client against `snap7-interop-otfabric:latest` with `SNAP_INTEROP_SERVERS=otfabric` and logs the image digest. It finds a wire change that breaks an earlier release; it is not independent verification. One step is a known difference (`knownDifferences` in `interop/runner.go`): that image answers a write to a read-only area with `0x03` (write-protected), the references with `0x0A`.
+The **Self-interop** workflow (manual, never required) runs this commit's client against `snap7-interop-otfabric:latest` with `SNAP_INTEROP_SERVERS=otfabric` and logs the image digest. It finds a wire change that breaks an earlier release; it is not independent verification. One step is a known difference (`knownDifferences` in `interop/runner.go`): that image answers a write to a read-only area with `0x03` (write-protected, the Siemens code), the references with `0x0A`; snap7-interop lists it in `tests/known-differences.tsv` as an intentional difference.
 
 With managed servers and no Docker, the suite skips (`interop/harness.go`). There is no `*_REQUIRE_*` switch that turns this into a failure: check `go test -v` output to confirm that the matrix ran.
 

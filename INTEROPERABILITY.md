@@ -39,7 +39,7 @@ Recorded: `Interop` workflow run for commit `436a28f` on `main`, and a local `ma
 
 ## Differences that the fixtures normalise
 
-- A rejected write to read-only memory is reported by both adapters as item code `0x0A`, normalised to `address-out-of-range`. Stock Snap7 does not use the distinct write-protected code `0x03`. So this suite does not exercise that code.
+- A rejected write to read-only memory is reported by both adapters as item code `0x0A`, normalised to `address-out-of-range`. Stock Snap7 has no code for refused access (`0x03`), so this suite does not exercise it against the peers; the Self-interop workflow does, against go-s7comm's own server.
 - The python adapter changes stock python-snap7 behaviour for out-of-range access, read-only access and bit writes so that it matches native Snap7 (snap7-interop `docs/compatibility.md`). Agreement between the peers on these points is therefore by construction, not two independent observations.
 
 ## Not covered
@@ -48,7 +48,7 @@ No independent peer has exercised these; they are tested only against the fake s
 
 ## Our own server (not a peer)
 
-snap7-interop publishes go-s7comm's own `server` package behind the same contract as `ghcr.io/otfabric/snap7-interop-otfabric` (adapter `otfabric`, `independentEngine: false`), built from the latest go-s7comm release. The manual **Self-interop** workflow runs this repository's client against its `:latest` and logs the digest. A pass there shows that the client and a released server of this library agree on the wire; it is not independent verification and adds nothing to the results above. One fixture step differs on purpose: the server answers a write to a read-only area with `0x03` (write-protected), where both peers send `0x0A`.
+snap7-interop publishes go-s7comm's own `server` package behind the same contract as `ghcr.io/otfabric/snap7-interop-otfabric` (adapter `otfabric`, `independentEngine: false`), built from the latest go-s7comm release. The manual **Self-interop** workflow runs this repository's client against its `:latest` and logs the digest. A pass there shows that the client and a released server of this library agree on the wire; it is not independent verification and adds nothing to the results above. One fixture step differs on purpose: the server answers a write to a read-only area with `0x03` (write-protected, the Siemens code), where both peers send `0x0A`. snap7-interop classifies it as an intentional difference ([COMPATIBILITY.md](https://github.com/otfabric/snap7-interop/blob/main/docs/COMPATIBILITY.md#write-to-a-read-only-area-0x03-and-0x0a)); the codes are compared in [ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors).
 
 Local run, 2026-11-06, linux/arm64: this branch's client against `snap7-interop-otfabric` built locally from go-s7comm v0.10.0, all 15 fixtures passed (with that known difference), next to the two peers.
 
