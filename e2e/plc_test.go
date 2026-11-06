@@ -200,7 +200,7 @@ func (p *plc) read(ref uint16, param []byte) []byte {
 	}
 	start := it.startBit / 8
 	out := make([]byte, 4, 4+it.count)
-	out[0], out[1] = wire.RetCodeSuccess, byte(wire.RespTransportSizeWord)
+	out[0], out[1] = wire.RetCodeSuccess, wire.DataTransportSizeByte
 	binary.BigEndian.PutUint16(out[2:4], uint16(it.count*8))
 	return ack(ref, param[:2], append(out, mem[start:start+it.count]...))
 }

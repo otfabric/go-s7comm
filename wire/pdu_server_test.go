@@ -164,6 +164,34 @@ func TestReadVarResponseRoundTrip(t *testing.T) {
 	}
 }
 
+// The client reads every data transport size the server sends with the
+// length unit Wireshark gives it: bytes for DINTEGER, REAL and OCTET STRING.
+func TestReadVarResponseLengthUnits(t *testing.T) {
+	items := []ReadVarResult{
+		{ReturnCode: RetCodeSuccess, TransportSize: DataTransportSizeInt, RawLength: 16, Data: []byte{1, 2}},
+		{ReturnCode: RetCodeSuccess, TransportSize: DataTransportSizeDInt, RawLength: 4, Data: []byte{3, 4, 5, 6}},
+		{ReturnCode: RetCodeSuccess, TransportSize: DataTransportSizeReal, RawLength: 4, Data: []byte{0x40, 0x49, 0x0F, 0xDB}},
+		{ReturnCode: RetCodeSuccess, TransportSize: DataTransportSizeOctet, RawLength: 3, Data: []byte{'a', 'b', 'c'}},
+	}
+	out, err := EncodeReadVarResponse(1, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, body, _ := ParseS7Header(out)
+	got, err := ParseReadVarResponse(body[:h.ParamLength], body[h.ParamLength:])
+	if err != nil || len(got) != len(items) {
+		t.Fatalf("parse: %+v %v", got, err)
+	}
+	for i := range items {
+		if !bytes.Equal(got[i].Data, items[i].Data) {
+			t.Errorf("item %d (%s): %x, want %x", i, ResponseTransportSize(items[i].TransportSize), got[i].Data, items[i].Data)
+		}
+	}
+	if r, err := DecodeAsReal(got[2]); err != nil || r < 3.14 || r > 3.15 {
+		t.Errorf("DecodeAsReal = %v, %v", r, err)
+	}
+}
+
 func TestWriteVarResponseRoundTrip(t *testing.T) {
 	out, err := EncodeWriteVarResponse(2, []byte{RetCodeSuccess})
 	if err != nil {

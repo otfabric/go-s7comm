@@ -639,7 +639,7 @@ func EncodeReadVarBitRequest(pduRef uint16, addr S7AnyBitAddress) ([]byte, error
 func EncodeWriteVarBitRequest(pduRef uint16, addr S7AnyBitAddress, value bool) ([]byte, error)
 func DecodeAsBit(item ReadVarItem) (bool, error)
 
-func NormalizeResponseDataLength(transportSize ResponseTransportSize, rawLength uint16) (int, error)
+func NormalizeResponseDataLength(transportSize ResponseTransportSize, rawLength uint16) (int, error) // bits for 0x04/0x05, bytes for 0x06/0x07/0x09, BIT 0x03 one byte; others refused
 
 func EncodeSZLRequest(pduRef, szlID, szlIndex uint16) []byte
 func ParseSZLResponse(data []byte) (*SZLResponse, error)

@@ -89,10 +89,10 @@ func TestDecodeTypedItems(t *testing.T) {
 
 func TestParseReadVarResponse_RejectedItems(t *testing.T) {
 	param := func(count byte) []byte { return []byte{FuncReadVar, count} }
-	success := []byte{RetCodeSuccess, byte(RespTransportSizeByte), 0x00, 0x02, 0xAA, 0xBB}
+	success := []byte{RetCodeSuccess, DataTransportSizeOctet, 0x00, 0x02, 0xAA, 0xBB}
 
 	t.Run("nonzero transport and zero length has no payload", func(t *testing.T) {
-		data := append([]byte{RetCodeAddressFault, byte(RespTransportSizeByte), 0, 0}, success...)
+		data := append([]byte{RetCodeAddressFault, DataTransportSizeOctet, 0, 0}, success...)
 		items, err := ParseReadVarResponse(param(2), data)
 		if err != nil {
 			t.Fatalf("parse: %v", err)
@@ -105,7 +105,7 @@ func TestParseReadVarResponse_RejectedItems(t *testing.T) {
 		}
 	})
 	t.Run("rejected odd payload and fill byte are skipped", func(t *testing.T) {
-		data := append([]byte{RetCodeAccessFault, byte(RespTransportSizeByte), 0, 3, 1, 2, 3, 0}, success...)
+		data := append([]byte{RetCodeAccessFault, DataTransportSizeOctet, 0, 3, 1, 2, 3, 0}, success...)
 		items, err := ParseReadVarResponse(param(2), data)
 		if err != nil {
 			t.Fatalf("parse: %v", err)
@@ -118,7 +118,7 @@ func TestParseReadVarResponse_RejectedItems(t *testing.T) {
 		}
 	})
 	t.Run("last rejected item may omit the fill byte", func(t *testing.T) {
-		items, err := ParseReadVarResponse(param(1), []byte{RetCodeAccessFault, byte(RespTransportSizeByte), 0, 1, 9})
+		items, err := ParseReadVarResponse(param(1), []byte{RetCodeAccessFault, DataTransportSizeOctet, 0, 1, 9})
 		if err != nil || len(items) != 1 {
 			t.Fatalf("items = %+v, err = %v", items, err)
 		}
@@ -132,10 +132,10 @@ func TestParseReadVarResponse_RejectedItems(t *testing.T) {
 	}{
 		{"header truncated", 1, []byte{RetCodeSuccess, 0x02, 0}, ErrTruncatedItemHeader},
 		{"second header missing", 2, success, ErrTruncatedItemHeader},
-		{"rejected payload overruns", 1, []byte{RetCodeAccessFault, byte(RespTransportSizeByte), 0, 9, 1}, ErrTruncatedItemPayload},
-		{"rejected item missing fill before next", 2, []byte{RetCodeAccessFault, byte(RespTransportSizeByte), 0, 1, 9}, ErrTruncatedItemPayload},
-		{"success item missing fill before next", 2, []byte{RetCodeSuccess, byte(RespTransportSizeByte), 0, 1, 9}, ErrTruncatedItemPayload},
-		{"success payload overruns", 1, []byte{RetCodeSuccess, byte(RespTransportSizeBit), 0xFF, 0xFF}, ErrTruncatedItemPayload},
+		{"rejected payload overruns", 1, []byte{RetCodeAccessFault, DataTransportSizeOctet, 0, 9, 1}, ErrTruncatedItemPayload},
+		{"rejected item missing fill before next", 2, []byte{RetCodeAccessFault, DataTransportSizeOctet, 0, 1, 9}, ErrTruncatedItemPayload},
+		{"success item missing fill before next", 2, []byte{RetCodeSuccess, DataTransportSizeOctet, 0, 1, 9}, ErrTruncatedItemPayload},
+		{"success payload overruns", 1, []byte{RetCodeSuccess, DataTransportSizeBit, 0xFF, 0xFF}, ErrTruncatedItemPayload},
 	}
 	for _, tc := range failures {
 		t.Run(tc.name, func(t *testing.T) {

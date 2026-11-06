@@ -26,22 +26,19 @@ func TestNormalizeResponseDataLength(t *testing.T) {
 		wantBytes     int
 		wantErr       bool
 	}{
-		{RespTransportSizeBit, 1, 1, false},
-		{RespTransportSizeBit, 8, 1, false},
-		{RespTransportSizeByte, 4, 4, false},
-		{RespTransportSizeWord, 16, 2, false},
-		{RespTransportSizeDWord, 32, 4, false},
-		{RespTransportSizeReal, 32, 4, false},
-		{RespTransportSizeDATE, 16, 2, false},
-		{RespTransportSizeTOD, 32, 4, false},
-		{RespTransportSizeTIME, 32, 4, false},
-		{RespTransportSizeS5TIME, 16, 2, false},
-		{RespTransportSizeDT, 64, 8, false},
-		{RespTransportSizeCount, 16, 2, false},
-		{RespTransportSizeTimer, 16, 2, false},
-		{RespTransportSizeIECCount, 16, 2, false},
-		{RespTransportSizeIECTimer, 16, 2, false},
-		{RespTransportSizeHSCounter, 16, 2, false},
+		// Wireshark packet-s7comm.c: bits for 0x04 and 0x05, bytes for 0x06, 0x07 and 0x09.
+		{DataTransportSizeBit, 1, 1, false},
+		{DataTransportSizeByte, 8, 1, false},
+		{DataTransportSizeByte, 32, 4, false},
+		{DataTransportSizeInt, 16, 2, false},
+		{DataTransportSizeDInt, 4, 4, false},
+		{DataTransportSizeReal, 4, 4, false},
+		{DataTransportSizeOctet, 3, 3, false},
+		{DataTransportSizeNull, 0, 0, true},
+		{0x01, 1, 0, true}, // request transport sizes are not data transport sizes
+		{0x02, 4, 0, true},
+		{0x08, 4, 0, true},
+		{0x1C, 16, 0, true},
 		{ResponseTransportSize(0xFF), 10, 0, true},
 	}
 	for _, tt := range tests {
@@ -149,7 +146,7 @@ func TestParseReadVarResponse_MultiItemWithFillByte(t *testing.T) {
 	// Item2: retCode(1) + ts(1) + len(2) + payload(2) = 6 bytes. Total 12 bytes.
 	param := []byte{FuncReadVar, 0x02}
 	data := []byte{
-		RetCodeSuccess, 0x01, 0x00, 0x01, 0xAB, 0x00, // 1 bit = 1 byte, fill
+		RetCodeSuccess, DataTransportSizeBit, 0x00, 0x01, 0xAB, 0x00, // 1 bit = 1 byte, fill
 		RetCodeSuccess, 0x04, 0x00, 0x10, 0x12, 0x34, // 16 bits = 2 bytes
 	}
 	items, err := ParseReadVarResponse(param, data)
@@ -219,17 +216,20 @@ func TestSyntaxIDString(t *testing.T) {
 }
 
 func TestResponseTransportSize_String(t *testing.T) {
-	if got := RespTransportSizeByte.String(); got != "BYTE" {
-		t.Errorf("RespTransportSizeByte.String(): got %q", got)
-	}
-	if got := RespTransportSizeDATE.String(); got != "DATE" {
-		t.Errorf("RespTransportSizeDATE.String(): got %q", got)
-	}
-	if got := RespTransportSizeIECCount.String(); got != "IEC_COUNTER" {
-		t.Errorf("RespTransportSizeIECCount.String(): got %q", got)
-	}
-	if got := ResponseTransportSize(0xFE).String(); got != "0xFE" {
-		t.Errorf("unknown transport size: got %q", got)
+	for v, want := range map[ResponseTransportSize]string{
+		DataTransportSizeNull:  "NULL",
+		DataTransportSizeBit:   "BIT",
+		DataTransportSizeByte:  "BYTE/WORD/DWORD",
+		DataTransportSizeInt:   "INTEGER",
+		DataTransportSizeDInt:  "DINTEGER",
+		DataTransportSizeReal:  "REAL",
+		DataTransportSizeOctet: "OCTET STRING",
+		0x02:                   "0x02",
+		0xFE:                   "0xFE",
+	} {
+		if got := v.String(); got != want {
+			t.Errorf("ResponseTransportSize(0x%02X).String() = %q, want %q", byte(v), got, want)
+		}
 	}
 }
 
@@ -284,7 +284,7 @@ func TestParseReadVarResponse_NonSuccessTruncatedPayload(t *testing.T) {
 	// Rejected item claims a known nonzero payload but buffer is short → hard error
 	// (avoids mis-aligning a following multi-item parse).
 	param := []byte{FuncReadVar, 0x01}
-	data := []byte{RetCodeAddressFault, byte(RespTransportSizeByte), 0x00, 0x10} // 16 bytes missing
+	data := []byte{RetCodeAddressFault, DataTransportSizeOctet, 0x00, 0x10} // 16 bytes missing
 	_, err := ParseReadVarResponse(param, data)
 	if err == nil {
 		t.Fatal("expected truncated payload error")
@@ -509,10 +509,10 @@ func TestDecodeAsBit(t *testing.T) {
 	if _, err := DecodeAsBit(ReadVarItem{ReturnCode: RetCodeAddressFault, RawTransportSize: 0, RawLength: 0}); err == nil {
 		t.Fatal("expected error for rejected item")
 	}
-	if _, err := DecodeAsBit(ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: byte(RespTransportSizeByte), RawLength: 1, Data: []byte{0x01}}); err == nil {
+	if _, err := DecodeAsBit(ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: DataTransportSizeOctet, RawLength: 1, Data: []byte{0x01}}); err == nil {
 		t.Fatal("expected error for BYTE transport")
 	}
-	if _, err := DecodeAsBit(ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: byte(RespTransportSizeBit), RawLength: 1, Data: []byte{0x01}}); err == nil {
+	if _, err := DecodeAsBit(ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: TransportSizeBit, RawLength: 1, Data: []byte{0x01}}); err == nil {
 		t.Fatal("expected error for request-style 0x01 transport in data section")
 	}
 	if _, err := DecodeAsBit(ReadVarItem{ReturnCode: RetCodeSuccess, RawTransportSize: DataTransportSizeBit, RawLength: 1, Data: nil}); err == nil {
@@ -550,8 +550,8 @@ func FuzzParseReadVarResponse(f *testing.F) {
 }
 
 func FuzzNormalizeResponseDataLength(f *testing.F) {
-	f.Add(byte(RespTransportSizeWord), uint16(16))
-	f.Add(byte(RespTransportSizeByte), uint16(4))
+	f.Add(byte(DataTransportSizeByte), uint16(16))
+	f.Add(byte(DataTransportSizeOctet), uint16(4))
 	f.Fuzz(func(t *testing.T, transportSize byte, rawLength uint16) {
 		_, _ = NormalizeResponseDataLength(ResponseTransportSize(transportSize), rawLength)
 	})
