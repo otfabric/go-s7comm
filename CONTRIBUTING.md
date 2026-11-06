@@ -19,6 +19,7 @@ Run `make help` for the list of targets.
 - `make test`: unit tests with the race detector. Tests use a fake server and need no PLC.
 - `make coverage`: writes `coverage.out`. CI enforces the minimum in `.github/workflows/ci.yml`; do not lower it.
 - `make interop`: the Snap7 suite, see [README.md](README.md#interop-tests).
+- **Self-interop** (manual workflow): this commit's client against go-s7comm's own published server, `ghcr.io/otfabric/snap7-interop-otfabric:latest` from snap7-interop. Run it after a change on the wire; it is never required and pins nothing, so it cannot ask for a release.
 
 Add a fuzz target for any new decoder of untrusted input.
 

@@ -46,6 +46,12 @@ Recorded: `Interop` workflow run for commit `436a28f` on `main`, and a local `ma
 
 No independent peer has exercised these; they are tested only against the fake server, if at all: SZL, `Identify`, CPU state, protection level, diagnostic buffer, block list, info and upload, timers and counters, `Discover`, `ProbeRackSlots`, `CompareRead`, `ProbeReadableRanges`, multi-PDU read chunking. snap7-interop lists them as deferred or client-side (`docs/go-s7comm-coverage.md`).
 
+## Our own server (not a peer)
+
+snap7-interop publishes go-s7comm's own `server` package behind the same contract as `ghcr.io/otfabric/snap7-interop-otfabric` (adapter `otfabric`, `independentEngine: false`), built from the latest go-s7comm release. The manual **Self-interop** workflow runs this repository's client against its `:latest` and logs the digest. A pass there shows that the client and a released server of this library agree on the wire; it is not independent verification and adds nothing to the results above. One fixture step differs on purpose: the server answers a write to a read-only area with `0x03` (write-protected), where both peers send `0x0A`.
+
+Local run, 2026-11-06, linux/arm64: this branch's client against `snap7-interop-otfabric` built locally from go-s7comm v0.10.0, all 15 fixtures passed (with that known difference), next to the two peers.
+
 ## Reproduce
 
 ```sh

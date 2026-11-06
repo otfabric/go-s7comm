@@ -2,7 +2,7 @@
 
 ## v0.10.0
 
-**Date:** unreleased
+**Date:** 2026-11-06
 **Previous release:** v0.9.0
 
 ### Fixed

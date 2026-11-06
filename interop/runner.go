@@ -22,7 +22,18 @@ import (
 
 const opTimeout = 10 * time.Second
 
-func runFixtureAgainst(t *testing.T, host string, port, rack, slot int, fx *CompiledFixture) {
+// knownDifferences are steps where a server answers differently from the
+// fixture on purpose, keyed by server, fixture and step: the outcome that
+// server must give instead. Only the otfabric image (go-s7comm's own server,
+// not a reference) has one: it answers a write to a read-only area with the
+// Siemens code 0x03 (write-protected) where both references send 0x0A,
+// which the fixture normalises to address-out-of-range. snap7-interop lists
+// the same step in own/go-s7comm/known-differences.tsv.
+var knownDifferences = map[string]Outcome{
+	"otfabric/read-only-reject/1": OutcomeWriteProtected,
+}
+
+func runFixtureAgainst(t *testing.T, server, host string, port, rack, slot int, fx *CompiledFixture) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -34,6 +45,10 @@ func runFixtureAgainst(t *testing.T, host string, port, rack, slot int, fx *Comp
 	defer func() { _ = c.Close() }()
 
 	for i, exp := range fx.Expectations {
+		if want, ok := knownDifferences[fmt.Sprintf("%s/%s/%d", server, fx.ID, i)]; ok {
+			t.Logf("known difference: %s step %d of %s expects %s, not %s", server, i, fx.ID, want, exp.WantOutcome)
+			exp.WantOutcome = want
+		}
 		name := fmt.Sprintf("step%d_%s", i, exp.Operation)
 		ok := t.Run(name, func(t *testing.T) {
 			stepCtx, stepCancel := context.WithTimeout(ctx, opTimeout)
@@ -307,7 +322,7 @@ func mapItemReturnCode(code byte) Outcome {
 	case wire.RetCodeAddressFault, wire.RetCodeNotAvailable:
 		// snap7-interop normalizes OOR and RO-reject (0x0A) to address-out-of-range.
 		return OutcomeAddressOutOfRange
-	case 0x03: // write protected (not emitted by current adapters for RO fixtures)
+	case wire.RetCodeAccessFault: // 0x03; the otfabric image's answer for a read-only area
 		return OutcomeWriteProtected
 	default:
 		return OutcomeProtocolFailure
