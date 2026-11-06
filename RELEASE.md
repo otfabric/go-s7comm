@@ -1,5 +1,19 @@
 # go-s7comm Releases
 
+## v0.10.1
+
+**Date:** 2026-11-06
+**Previous release:** v0.10.0
+
+### Documentation
+
+- ERRORS.md, *Refused access*: item codes `0x03`, `0x05` and `0x0A` with the Siemens meanings (STEP 7 V20, *Use of FETCH/WRITE*), next to header-level refusals of the whole job (`0x81/0x04`, `0x85`, and `0x83/0x04` as an S7-300 sends it), and what the client returns for each. Snap7-based servers send `0x0A` for a refused write, so `0x0A` alone does not mean the DB is missing.
+- The server's `0x03` for a write to a read-only area is documented as a decision, with the Siemens reference, in README.md, API.md, LIMITATIONS.md, INTEROPERABILITY.md, TESTING.md, docs/FEATURE-STATUS.md and the `server` package doc. snap7-interop v0.6.1 classifies it as an intentional difference. What a physical CPU sends is not verified yet (#18).
+
+No code change.
+
+---
+
 ## v0.10.0
 
 **Date:** 2026-11-06

@@ -28,7 +28,7 @@ const opTimeout = 10 * time.Second
 // not a reference) has one: it answers a write to a read-only area with the
 // Siemens code 0x03 (write-protected) where both references send 0x0A,
 // which the fixture normalises to address-out-of-range. snap7-interop lists
-// the same step in own/go-s7comm/known-differences.tsv.
+// the same step as an intentional difference in tests/known-differences.tsv.
 var knownDifferences = map[string]Outcome{
 	"otfabric/read-only-reject/1": OutcomeWriteProtected,
 }

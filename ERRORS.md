@@ -142,6 +142,22 @@ type S7Error struct {
 
 Helpers: `HeaderErrorString`, `ItemReturnCodeString`, `ErrClassString`, `ParamErrorFromParam`, `ParamErrorCodeString`.
 
+### Refused access: item codes and header errors
+
+A PLC can refuse access in two different places. Keep them apart in error handling; one does not imply the other.
+
+| Where | Codes | What it means | In this library |
+|---|---|---|---|
+| Item return code of one Read Var or Write Var item | `0x03` | Object access is not allowed, e.g. a write to a write-protected DB | `S7Error` with `Class` 0, `Code` `0x03` ("access denied"); reads: `ReadStatusRejected`, `ReturnCode` `0x03` |
+| | `0x05` | Invalid address (syntax ID, range, type, bit number) | `Code` `0x05` |
+| | `0x0A` | The object does not exist, or the range limit was exceeded | `Code` `0x0A` |
+| Header error class and code of the whole job | `0x81/0x04`, `0x85/xx` | The job is refused, e.g. PUT/GET access is disabled on an S7-1200/1500 | `S7Error` with `Class` and `Code` |
+| | `0x83/0x04` | The same refusal in the form an S7-300 sends ([Apache PLC4X, 2026-08-16](https://www.mail-archive.com/commits@plc4x.apache.org/msg24099.html)); `HeaderErrorString` gives the generic Siemens text for this code ("no further parallel upload possible") | `S7Error` `Class` `0x83`, `Code` `0x04` |
+
+The item codes are the Siemens ones: STEP 7 V20, [Use of FETCH/WRITE (S7-300, S7-400)](https://docs.tia.siemens.cloud/r/en-us/v20/editing-devices-and-networks/configure-networks/communication-via-connections/connection-types-s7-300-s7-400-s7-1500/fetch/write-mode-s7-300-s7-400/use-of-fetch/write-s7-300-s7-400), diagnostic-buffer codes 03H "Object access is not allowed", 05H "Invalid address", 0AH "The object does not exist, or the range limit was exceeded"; Wireshark's s7comm dissector and the PLC4X S7 model name them the same way. Snap7-based servers send `0x0A` for every refused write, including a write to a read-only area, because Snap7 has no code for refused access ([snap7-interop COMPATIBILITY.md](https://github.com/otfabric/snap7-interop/blob/main/docs/COMPATIBILITY.md#write-to-a-read-only-area-0x03-and-0x0a)); a client must therefore not read `0x0A` as "the DB does not exist" without more context.
+
+Which item code a physical Siemens CPU sends for a write to a write-protected DB is not verified yet ([#18](https://github.com/otfabric/go-s7comm/issues/18)).
+
 ### Other wire types and sentinels
 
 | Symbol | Notes |
