@@ -13,9 +13,6 @@ run-name: "Self-interop against snap7-interop-otfabric:latest, by @${{ github.ac
 # (INTEROPERABILITY.md).
 on:
   workflow_dispatch:
-  # TEMPORARY: removed before merge; a new dispatch-only workflow cannot run from a branch.
-  push:
-    branches: [ci/self-interop]
 
 permissions:
   contents: read
