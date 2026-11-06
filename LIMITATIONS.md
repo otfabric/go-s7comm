@@ -5,7 +5,7 @@ What go-s7comm does not do, or does only partly. API behaviour is in [API.md](AP
 ## Scope not implemented
 
 - **Classic S7comm only**, with no TLS and no password handling ([SECURITY.md](SECURITY.md)).
-- **The server is for tests**: package `server` answers only Setup Communication, Read Var and Write Var on DBs, inputs, outputs and markers. It has no PLC program, timers, counters, SZL, blocks, clock, access protection or password, and it gives no answer to those requests.
+- **The server is for tests**: package `server` answers only Setup Communication, Read Var and Write Var on DBs, inputs, outputs and markers. It has no PLC program, timers, counters, SZL, blocks, clock, access protection or password; those requests get error `0x8104` (service not implemented).
 - **Block download and PLC start/stop**: `wire` names these function codes, but `client` has no operation for them. Blocks can be listed, inspected and uploaded.
 - **`Discover`** is IPv4 only and rejects ranges larger than `/12`.
 
@@ -18,6 +18,6 @@ What go-s7comm does not do, or does only partly. API behaviour is in [API.md](AP
 ## Verification
 
 - Independently verified against: the native Snap7 and pure-Python servers of [snap7-interop](https://github.com/otfabric/snap7-interop) v0.3.0, pinned by digest in the Makefile. See [README.md](README.md#interop-tests).
-- The server's answers follow the Snap7 server source, not a capture of a real CPU. Besides this module's client, one other client has been run against it: snap7-interop's own probe (v0.4.2, which does not use go-s7comm) passed all 15 canonical fixtures, 84 steps, in a local run on 2026-11-06. No third-party S7 client (Snap7, python-snap7, a Siemens HMI) has been run against it.
+- The server's codes are the Siemens ones as Wireshark's s7comm dissector lists them; they are not checked against a capture of a real CPU. Besides this module's client, one other client has been run against it: snap7-interop's own probe (v0.4.2, which does not use go-s7comm) in a local run on 2026-11-06, 14 of the 15 canonical fixtures passed, 84 steps. `read-only-reject` fails by design: the server answers a write to a read-only area with `0x03` (accessing the object not allowed, which the probe reports as `write-protected`), where the fixture expects the `0x0A` that both snap7-interop servers send. No third-party S7 client (Snap7, python-snap7, a Siemens HMI) has been run against it.
 - Not verified: this repository holds no test against a physical PLC. Behaviour on a real CPU may differ from these servers.
 - Certification: none.

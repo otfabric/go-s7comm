@@ -38,8 +38,8 @@ See [API.md](API.md) (Client options) for `WithLogger` / `NewSlogLogger`.
 | Level | Event |
 |---|---|
 | Info | listening; connection open; connection closed (with the reason) |
-| Warn | connection refused at `MaxConnections`; connection dropped on a malformed PDU |
-| Debug | failed COTP handshake; setup communication (requested and granted PDU); unanswered job or user data; malformed job |
+| Warn | connection refused at `MaxConnections`; connection dropped on a PDU whose header cannot be read |
+| Debug | failed COTP handshake; setup communication (requested and granted PDU); job or user data not implemented (answered `0x8104`); malformed job |
 
 ## Context and cancellation
 

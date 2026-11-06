@@ -14,9 +14,8 @@ import (
 	"github.com/otfabric/go-cotp"
 )
 
-// PDU size limits of Setup Communication (Snap7 server: MinPduSize 240,
-// IsoPayload_Size 4096). A client's request is clamped into
-// MinPDUSize..Config.MaxPDUSize.
+// Bounds of Config.MaxPDUSize. Setup Communication grants the smaller of
+// the client's request and Config.MaxPDUSize.
 const (
 	MinPDUSize        = 240
 	MaxPDUSize        = 4096
@@ -73,8 +72,8 @@ func (c Config) withDefaults() (Config, error) {
 
 // Server answers S7 communication on ISO-on-TCP (RFC 1006) from memory it
 // holds: Setup Communication, Read Var and Write Var on the registered areas.
-// Other jobs and user data (SZL, blocks, control) get no answer, as with the
-// Snap7 server. It accepts any rack, slot and TSAP.
+// Other jobs and user data (SZL, blocks, control) get header error 0x8104
+// (service not implemented). It accepts any rack, slot and TSAP.
 type Server struct {
 	cfg Config
 	mem *memory

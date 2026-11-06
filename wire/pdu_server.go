@@ -11,8 +11,8 @@ import (
 
 // Server-side codec: decoders for the jobs a client sends and encoders for
 // the Ack-Data answers. Layouts follow the client encoders in this package;
-// response transport sizes and item codes follow the Snap7 server
-// (SCADACS/snap7 f6ff903, s7_server.cpp ReadArea/WriteArea).
+// data transport sizes and their length units are those of Wireshark's
+// s7comm dissector (packet-s7comm.c, S7COMM_DATA_TRANSPORT_SIZE_*).
 
 // ErrMalformedRequest: a job's parameter or data section does not match its
 // declared layout. A server cannot answer it item by item.
@@ -25,7 +25,8 @@ const AckDataHeaderSize = S7HeaderSize + 2
 // Data section transport sizes (Read Var answers, Write Var data items).
 const (
 	DataTransportSizeByte  = 0x04 // byte/word/dword; length in bits
-	DataTransportSizeInt   = 0x05 // int/dint; length in bits
+	DataTransportSizeInt   = 0x05 // integer; length in bits
+	DataTransportSizeDInt  = 0x06 // double integer; length in bytes
 	DataTransportSizeReal  = 0x07 // real; length in bytes
 	DataTransportSizeOctet = 0x09 // octet string; length in bytes
 )
@@ -166,11 +167,12 @@ type WriteVarData struct {
 	Data          []byte // payload, aliases the request
 }
 
-// writeDataBytes is the payload length of a Write Var data item: bits for
-// byte and integer transports, bytes for bit, real and octet (Snap7 WriteArea).
+// writeDataBytes is the payload length of a Write Var data item: the length
+// field counts bits for the byte and integer transports, bytes for double
+// integer, real and octet string, and bits for BIT, whose one bit takes a byte.
 func writeDataBytes(transport byte, raw uint16) (int, error) {
 	switch transport {
-	case DataTransportSizeBit, DataTransportSizeReal, DataTransportSizeOctet:
+	case DataTransportSizeBit, DataTransportSizeDInt, DataTransportSizeReal, DataTransportSizeOctet:
 		return int(raw), nil
 	case DataTransportSizeByte, DataTransportSizeInt:
 		if raw%8 != 0 {

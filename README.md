@@ -18,7 +18,7 @@ The library provides:
 - SZL-based identification and diagnostics helpers
 - Block listing, block metadata retrieval, and block upload
 - Low-level wire parsing/encoding packages for protocol internals
-- An in-memory S7 server for tests (`server`): Setup Communication, Read Var and Write Var on DBs, inputs, outputs and markers, answered as the Snap7 server answers them
+- An in-memory S7 server for tests (`server`): Setup Communication, Read Var and Write Var on DBs, inputs, outputs and markers, with the codes Siemens defines for them
 
 **Docs:** [API.md](API.md) (public API) · [ERRORS.md](ERRORS.md) (error and result semantics) · [OBSERVABILITY.md](OBSERVABILITY.md) (logging) · [ARCHITECTURE.md](ARCHITECTURE.md) (layers, concurrency) · [TESTING.md](TESTING.md) (test tiers) · [INTEROPERABILITY.md](INTEROPERABILITY.md) (peers, results) · [Feature status](docs/FEATURE-STATUS.md) · [LIMITATIONS.md](LIMITATIONS.md) · [RELEASE.md](RELEASE.md) (changelog)
 
@@ -272,7 +272,7 @@ go func() { _ = srv.ListenAndServe(ctx, "127.0.0.1:1102") }()
 defer srv.Close()
 ```
 
-It answers Setup Communication, Read Var and Write Var (up to 20 S7ANY items) with the PDU negotiation, item return codes and transport sizes of the Snap7 server: unknown area or DB `0x0A`, out of range, unaligned or more than one bit `0x05`, wrong write length `0x07`, a write to a read-only area `0x0A`. Other jobs and user data get no answer; a malformed PDU closes the connection. Details: [API.md](API.md#server), limits: [LIMITATIONS.md](LIMITATIONS.md).
+It answers Setup Communication, Read Var and Write Var (S7ANY items) with the item return codes and header errors Siemens defines (as Wireshark's s7comm dissector lists them): object does not exist `0x0A`, invalid address `0x05`, data type not supported `0x06`, data type inconsistent `0x07`, a write to a read-only area: accessing the object not allowed `0x03`. An answer larger than the PDU is refused with header error `0x8500`; other jobs and user data get `0x8104` (service not implemented); a PDU whose header cannot be read closes the connection. Details: [API.md](API.md#server), limits: [LIMITATIONS.md](LIMITATIONS.md).
 
 ## Development
 

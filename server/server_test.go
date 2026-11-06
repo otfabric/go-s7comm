@@ -182,12 +182,12 @@ func TestClientLargeReadWithinThePDU(t *testing.T) {
 	}
 }
 
-func TestPDUSizeIsClamped(t *testing.T) {
+func TestPDUSizeIsTheSmallerOfBoth(t *testing.T) {
 	srv, err := server.New(server.Config{MaxPDUSize: 960})
 	must(t, err)
 	must(t, srv.RegisterDB(1, make([]byte, 4), server.AreaOptions{}))
 	port := start(t, srv)
-	for _, tc := range []struct{ ask, want int }{{100, 240}, {480, 480}, {2000, 960}} {
+	for _, tc := range []struct{ ask, want int }{{100, 100}, {480, 480}, {2000, 960}} {
 		c := dial(t, port, client.WithMaxPDU(tc.ask))
 		if got := c.PDUSize(); got != tc.want {
 			t.Errorf("asked %d: PDUSize = %d, want %d", tc.ask, got, tc.want)

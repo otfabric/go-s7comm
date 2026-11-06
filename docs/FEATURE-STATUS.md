@@ -45,7 +45,7 @@ The module is pure Go; go-cotp and go-tpkt are its only dependencies, apart from
 | Rack/slot probe | `ProbeRackSlots` | ✅ | yes | no |
 | Discovery | `Discover` | ◐ IPv4 only, up to `/12` | validation, CIDR handling and cancellation only | no |
 | Block download, PLC start and stop | — | — | n/a | n/a |
-| Test server: setup, Read Var, Write Var on DB, I, Q, M | `server.New`, `RegisterDB`, `RegisterArea`, `Serve` | ◐ for tests; no SZL, blocks, timers, counters | this module's client (`server/`) | snap7-interop's probe, 15 fixtures, local run ([LIMITATIONS.md](../LIMITATIONS.md#verification)) |
+| Test server: setup, Read Var, Write Var on DB, I, Q, M | `server.New`, `RegisterDB`, `RegisterArea`, `Serve` | ◐ for tests; no SZL, blocks, timers, counters | this module's client (`server/`) | snap7-interop's probe, 14 of 15 fixtures (read-only code differs), local run ([LIMITATIONS.md](../LIMITATIONS.md#verification)) |
 | TLS, password handling | — | — | n/a | n/a |
 
 Wire decoders in `wire/` have fuzz targets; see [TESTING.md](../TESTING.md#fuzzing).

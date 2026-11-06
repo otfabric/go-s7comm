@@ -4,14 +4,16 @@
 // blocks, inputs, outputs and markers in memory and answers classic S7
 // clients on ISO-on-TCP (RFC 1006, COTP TP0 through go-cotp).
 //
-// It answers Setup Communication, Read Var and Write Var (S7ANY items, up
-// to 20 per job), with the item return codes, response transport sizes
-// and PDU negotiation of the Snap7 server (SCADACS/snap7 f6ff903, the one
-// in snap7-interop). It accepts any rack, slot and TSAP. User data (SZL,
-// clock, block info), block transfer and PLC control get no answer, as
-// Snap7 answers jobs it cannot handle; a malformed PDU closes the
-// connection. It is test infrastructure, not a PLC: there is no program,
-// no timers or counters, no access protection and no TLS.
+// It answers Setup Communication, Read Var and Write Var (S7ANY items)
+// with the item return codes, header errors and data transport sizes
+// Siemens defines, as Wireshark's s7comm dissector lists them: 0x0A object
+// does not exist, 0x05 invalid address, 0x06 data type not supported, 0x07
+// data type inconsistent, 0x03 accessing the object not allowed (read-only
+// area); header error 0x8500 for an answer past the PDU and 0x8104 (service
+// not implemented) for other jobs and user data. It accepts any rack, slot
+// and TSAP. A PDU whose header cannot be read closes the connection. It is
+// test infrastructure, not a PLC: there is no program, no timers or
+// counters, no access protection and no TLS.
 //
 //	srv, err := server.New(server.Config{})
 //	if err != nil { ... }

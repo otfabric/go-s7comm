@@ -48,8 +48,8 @@ const MaxAreaSize = wire.MaxS7AnyByteOffset + 1
 
 // AreaOptions are the properties of a registered area.
 type AreaOptions struct {
-	// ReadOnly makes clients' writes fail with item code 0x0A (object not
-	// available), as the snap7-interop reference servers answer them.
+	// ReadOnly makes clients' writes fail with item code 0x03 (accessing
+	// the object not allowed).
 	// The host-side Write still changes the area.
 	ReadOnly bool
 }

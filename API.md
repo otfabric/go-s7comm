@@ -747,20 +747,21 @@ const MinPDUSize, MaxPDUSize, DefaultPDUSize, DefaultMaxConns, DefaultHandshake,
 var ErrServerClosed, ErrUnknownArea, ErrAreaExists, ErrOutOfRange
 ```
 
-Protocol behaviour follows the Snap7 server (SCADACS/snap7 f6ff903, used by snap7-interop):
+Protocol behaviour follows the codes Siemens defines, as Wireshark's s7comm dissector (`packet-s7comm.c`) lists them, and not the quirks of one implementation:
 
 | Request | Answer |
 |---|---|
-| Setup Communication | PDU size = request clamped into 240..`MaxPDUSize`; AmQ calling and called echoed |
-| Read Var | Up to 20 items (more are dropped). BIT `0x03` (length 1 bit), BYTE/WORD/DWORD `0x04` (bits), INT/DINT `0x05` (bits), REAL `0x07` (bytes), CHAR `0x09` (bytes). An item past the negotiated PDU: code `0x85` |
-| Write Var | One code per item; more than 20 items closes the connection |
-| Item codes | `0x0A` unknown area or DB, item not S7ANY, write to a read-only area; `0x05` zero count, more than one bit, unaligned start, span past the end, unknown transport size on a read; `0x06` unknown transport size on a write; `0x07` data length unequal to the addressed size |
-| Other jobs, user data | No answer, connection kept |
-| Malformed PDU (lengths, ROSCTR, item layout) | Connection closed |
+| Setup Communication | PDU size = the smaller of the request and `MaxPDUSize`; AmQ calling and called = the smaller of the request and 1 (the server works one job at a time), at least 1 |
+| Read Var | One result per item. Data transport sizes: BIT `0x03` (length 1 bit), BYTE/WORD/DWORD `0x04` (bits), INTEGER `0x05` (bits), DINTEGER `0x06` (bytes), REAL `0x07` (bytes), OCTET STRING `0x09` for CHAR (bytes). An answer that would exceed the negotiated PDU: header error `0x8500` ("wrong frames"), no items |
+| Write Var | One return code per item |
+| Item return codes | `0x0A` object does not exist (area or DB not held); `0x05` invalid address (item not S7ANY, zero count, more than one bit, a byte item not starting on a byte, a span past the end); `0x06` data type not supported (transport size not taken, e.g. timer or counter); `0x07` data type inconsistent (write data length unequal to the addressed size); `0x03` accessing the object not allowed (write to a read-only area) |
+| Other jobs (block transfer, PLC control, …), a PDU that is not a job, a malformed job | Ack-Data with header error `0x8104` ("service not implemented on the module or a frame error"), the function code as parameter |
+| User data (SZL, clock, block info, …) | User data response, same function group, subfunction and sequence number, parameter error `0x8104`, return code `0x0A` |
+| PDU whose header cannot be read (protocol ID, lengths) | Connection closed |
 
-Any rack, slot and TSAP is accepted. A zero-count item is refused with `0x05`: Snap7 answers it from its buffer.
+Any rack, slot and TSAP is accepted.
 
-Server-side codec in `wire`: `ParseSetupCommRequest`, `EncodeSetupCommResponse`, `ParseReadVarRequest`, `ParseWriteVarRequest` (`VarSpec`, `WriteVarData`), `EncodeReadVarResponse` (`ReadVarResult`, `ReadVarResultSize`), `EncodeWriteVarResponse`, `EncodeAckData`, `ErrMalformedRequest`, `AckDataHeaderSize` and the data transport sizes `DataTransportSizeByte`, `DataTransportSizeInt`, `DataTransportSizeReal`, `DataTransportSizeOctet`.
+Server-side codec in `wire`: `ParseSetupCommRequest`, `EncodeSetupCommResponse`, `ParseReadVarRequest`, `ParseWriteVarRequest` (`VarSpec`, `WriteVarData`), `EncodeReadVarResponse` (`ReadVarResult`, `ReadVarResultSize`), `EncodeWriteVarResponse`, `EncodeAckData`, `ErrMalformedRequest`, `AckDataHeaderSize` and the data transport sizes `DataTransportSizeByte`, `DataTransportSizeInt`, `DataTransportSizeDInt`, `DataTransportSizeReal`, `DataTransportSizeOctet`.
 
 ## Related docs
 

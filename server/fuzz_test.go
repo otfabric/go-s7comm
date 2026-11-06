@@ -9,9 +9,9 @@ import (
 	"github.com/otfabric/go-s7comm/wire"
 )
 
-// FuzzHandle feeds arbitrary PDUs to a session: it must not panic, an
-// answer must parse as Ack-Data with the job's PDU reference, and memory
-// keeps its size.
+// FuzzHandle feeds arbitrary PDUs to a session: it must not panic, a PDU
+// whose header can be read must get an answer that parses as Ack-Data (or
+// user data, for user data) with its PDU reference, and memory keeps its size.
 func FuzzHandle(f *testing.F) {
 	f.Add(must(wire.EncodeSetupCommRequest(1, 1, 1, 480)))
 	f.Add(must(wire.EncodeReadVarRequest(2, []wire.S7AnyAddress{{Area: wire.AreaDB, DBNumber: 1, Start: 0, Size: 4}})))
@@ -22,14 +22,18 @@ func FuzzHandle(f *testing.F) {
 	f.Fuzz(func(t *testing.T, req []byte) {
 		s := testSession(t, 240)
 		out, keep := s.handle(req)
-		if out == nil {
+		if !keep {
+			if out != nil {
+				t.Fatal("answer on a dropped connection")
+			}
 			return
 		}
-		if !keep {
-			t.Fatal("answer on a dropped connection")
+		if out == nil {
+			t.Fatal("readable PDU without an answer")
 		}
 		h, _, err := wire.ParseS7Header(out)
-		if err != nil || h.ROSCTR != wire.ROSCTRAckData || h.PDURef != binary.BigEndian.Uint16(req[4:6]) {
+		if err != nil || h.PDURef != binary.BigEndian.Uint16(req[4:6]) ||
+			(h.ROSCTR != wire.ROSCTRAckData && (h.ROSCTR != wire.ROSCTRUserdata || req[1] != byte(wire.ROSCTRUserdata))) {
 			t.Fatalf("answer %x: %+v %v", out, h, err)
 		}
 		if len(out) > 4096 {

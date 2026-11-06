@@ -46,7 +46,7 @@ func TestMalformedPDUDropsTheConnection(t *testing.T) {
 	}
 }
 
-func TestUnsupportedJobKeepsTheConnection(t *testing.T) {
+func TestUnsupportedJobGetsAnErrorAndKeepsTheConnection(t *testing.T) {
 	port := start(t, newServer(t, server.Config{}))
 	conn := openCOTP(t, port)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -65,12 +65,15 @@ func TestUnsupportedJobKeepsTheConnection(t *testing.T) {
 	if err := conn.WriteTSDU(ctx, setup); err != nil {
 		t.Fatal(err)
 	}
-	out, err := conn.ReadTSDU(ctx)
-	if err != nil {
-		t.Fatalf("no answer after an unsupported job: %v", err)
-	}
-	if h, _, err := wire.ParseS7Header(out); err != nil || h.PDURef != 2 {
-		t.Fatalf("answer %x: %v", out, err)
+	for ref, want := range [][2]byte{{0x81, 0x04}, {0, 0}} { // answers in job order
+		out, err := conn.ReadTSDU(ctx)
+		if err != nil {
+			t.Fatalf("no answer %d: %v", ref, err)
+		}
+		h, _, err := wire.ParseS7Header(out)
+		if err != nil || int(h.PDURef) != ref+1 || h.ErrorClass != want[0] || h.ErrorCode != want[1] {
+			t.Fatalf("answer %x: %+v %v", out, h, err)
+		}
 	}
 }
 
