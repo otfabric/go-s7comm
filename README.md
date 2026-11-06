@@ -309,6 +309,12 @@ This pulls pinned GHCR image digests, starts both containers per fixture, and ru
 | `SNAP_INTEROP_NATIVE_IMAGE` / `SNAP_INTEROP_PYTHON_IMAGE` | Override pinned image refs |
 | `SNAP_INTEROP_MANAGED=0` | Use already-running servers (`SNAP_INTEROP_NATIVE_ADDR` / `SNAP_INTEROP_PYTHON_ADDR`) |
 | `SNAP_INTEROP_FIXTURE=<id>` | Run a single fixture (e.g. `basic-db`) |
+| `SNAP_INTEROP_OTFABRIC_IMAGE` / `SNAP_INTEROP_SERVERS` | Add go-s7comm's own published server (`otfabric`, not a reference) / run only the named servers; see [TESTING.md](TESTING.md#interoperability-suite) |
+
+```sh
+# Against the latest published go-s7comm server (the Self-interop workflow, run by hand)
+SNAP_INTEROP_SERVERS=otfabric SNAP_INTEROP_OTFABRIC_IMAGE=ghcr.io/otfabric/snap7-interop-otfabric:latest make interop
+```
 
 ## License
 

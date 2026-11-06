@@ -31,6 +31,42 @@ type serverEndpoint struct {
 	container    string
 }
 
+// otfabric is go-s7comm's own server, as snap7-interop publishes it
+// (ghcr.io/otfabric/snap7-interop-otfabric). It is not a reference: it runs
+// only when SNAP_INTEROP_OTFABRIC_IMAGE names an image, and what it shows is
+// compatibility between this commit's client and a released server of this
+// library, not independent verification.
+const otfabric = "otfabric"
+
+// selectedServers returns the servers to run: the two references, plus
+// otfabric when SNAP_INTEROP_OTFABRIC_IMAGE is set, restricted to the
+// comma-separated names in SNAP_INTEROP_SERVERS when that is set.
+func selectedServers(t *testing.T) []serverEndpoint {
+	t.Helper()
+	all := defaultServers()
+	if image := os.Getenv("SNAP_INTEROP_OTFABRIC_IMAGE"); image != "" {
+		all = append(all, serverEndpoint{Name: otfabric, HostPort: 3102, ImageEnv: "SNAP_INTEROP_OTFABRIC_IMAGE", DefaultImage: image})
+	}
+	only := os.Getenv("SNAP_INTEROP_SERVERS")
+	if only == "" {
+		return all
+	}
+	var out []serverEndpoint
+	for _, name := range strings.Split(only, ",") {
+		found := false
+		for _, s := range all {
+			if s.Name == strings.TrimSpace(name) {
+				out = append(out, s)
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("SNAP_INTEROP_SERVERS: no server %q (otfabric needs SNAP_INTEROP_OTFABRIC_IMAGE)", name)
+		}
+	}
+	return out
+}
+
 func defaultServers() []serverEndpoint {
 	return []serverEndpoint{
 		{
@@ -64,13 +100,13 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{
 		managed:     managed,
 		fixturesDir: dir,
-		servers:     defaultServers(),
+		servers:     selectedServers(t),
 	}
-	if addr := os.Getenv("SNAP_INTEROP_NATIVE_ADDR"); addr != "" {
-		h.servers[0].HostPort = mustHostPort(t, addr)
-	}
-	if addr := os.Getenv("SNAP_INTEROP_PYTHON_ADDR"); addr != "" {
-		h.servers[1].HostPort = mustHostPort(t, addr)
+	for i := range h.servers {
+		// SNAP_INTEROP_NATIVE_ADDR, SNAP_INTEROP_PYTHON_ADDR, SNAP_INTEROP_OTFABRIC_ADDR
+		if addr := os.Getenv("SNAP_INTEROP_" + strings.ToUpper(h.servers[i].Name) + "_ADDR"); addr != "" {
+			h.servers[i].HostPort = mustHostPort(t, addr)
+		}
 	}
 	if managed {
 		if _, err := exec.LookPath("docker"); err != nil {
@@ -151,11 +187,18 @@ func (h *harness) containerLogs(srv serverEndpoint) string {
 	return string(out)
 }
 
+// dockerPull pulls image. When the pull fails but the image exists locally
+// (a local build, such as make -f own/go-s7comm/Makefile image in
+// snap7-interop), the local image is used.
 func dockerPull(image string) error {
 	cmd := exec.Command("docker", "pull", image)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	err := cmd.Run()
+	if err != nil && exec.Command("docker", "image", "inspect", image).Run() == nil {
+		return nil
+	}
+	return err
 }
 
 // waitS7Ready dials a full COTP+S7 setup. Bare TCP probes poison the Python adapter
