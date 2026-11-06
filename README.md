@@ -18,6 +18,7 @@ The library provides:
 - SZL-based identification and diagnostics helpers
 - Block listing, block metadata retrieval, and block upload
 - Low-level wire parsing/encoding packages for protocol internals
+- An in-memory S7 server for tests (`server`): Setup Communication, Read Var and Write Var on DBs, inputs, outputs and markers, answered as the Snap7 server answers them
 
 **Docs:** [API.md](API.md) (public API) · [ERRORS.md](ERRORS.md) (error and result semantics) · [OBSERVABILITY.md](OBSERVABILITY.md) (logging) · [ARCHITECTURE.md](ARCHITECTURE.md) (layers, concurrency) · [TESTING.md](TESTING.md) (test tiers) · [INTEROPERABILITY.md](INTEROPERABILITY.md) (peers, results) · [Feature status](docs/FEATURE-STATUS.md) · [LIMITATIONS.md](LIMITATIONS.md) · [RELEASE.md](RELEASE.md) (changelog)
 
@@ -31,6 +32,7 @@ The library provides:
 - [Rack/Slot Probe](#rackslot-probe)
 - [Readable range scan](#readable-range-scan)
 - [Compare read](#compare-read)
+- [Test server](#test-server)
 - [Development](#development)
 - [Interop tests](#interop-tests)
 - [License](#license)
@@ -75,6 +77,7 @@ go-s7comm/
 ├── model/             Areas, addresses, device info, codecs
 │   └── codec/         Typed encode/decode helpers
 ├── wire/              S7 PDU encode/decode and TSAP helpers (no TPKT/COTP)
+├── server/            In-memory S7 server for tests (setup, Read Var, Write Var)
 ├── interop/           Build-tagged (`-tags=interop`) Snap7 black-box tests
 ├── testdata/          Frame fixtures
 ├── API.md             Public API reference
@@ -252,6 +255,24 @@ s7commctl probe rackslot --ip 192.168.0.10 --strict
 s7commctl probe rackslot --ip 192.168.0.10 --confirm szl
 s7commctl probe rackslot --ip 192.168.0.10 --strict --first-confirmed
 ```
+
+## Test server
+
+Package `server` holds data blocks, inputs, outputs and markers in memory and answers S7 clients on ISO-on-TCP. It is for tests and test benches, not a PLC: no program, no timers or counters, no access protection, no TLS.
+
+```go
+srv, err := server.New(server.Config{}) // PDU up to 480, 32 connections
+if err != nil {
+	log.Fatal(err)
+}
+_ = srv.RegisterDB(1, make([]byte, 64), server.AreaOptions{})
+_ = srv.RegisterDB(2, []byte{0xAA}, server.AreaOptions{ReadOnly: true})
+_ = srv.RegisterArea(server.AreaMerkers, make([]byte, 32), server.AreaOptions{})
+go func() { _ = srv.ListenAndServe(ctx, "127.0.0.1:1102") }()
+defer srv.Close()
+```
+
+It answers Setup Communication, Read Var and Write Var (up to 20 S7ANY items) with the PDU negotiation, item return codes and transport sizes of the Snap7 server: unknown area or DB `0x0A`, out of range, unaligned or more than one bit `0x05`, wrong write length `0x07`, a write to a read-only area `0x0A`. Other jobs and user data get no answer; a malformed PDU closes the connection. Details: [API.md](API.md#server), limits: [LIMITATIONS.md](LIMITATIONS.md).
 
 ## Development
 

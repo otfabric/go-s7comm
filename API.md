@@ -29,6 +29,7 @@ Error and result semantics (when to use `errors.As` / `ReadResult.Status`, CLI e
   - [PDUs](#pdus)
   - [Inspection and errors](#inspection-and-errors)
   - [Diagnostic helpers](#diagnostic-helpers)
+- [server](#server)
 - [Related docs](#related-docs)
 
 ## Packages
@@ -37,6 +38,7 @@ Error and result semantics (when to use `errors.As` / `ReadResult.Status`, CLI e
 - **model** — Domain data types, areas, value encoders/decoders, device and fingerprint structures
 - **model/codec** — Encode/decode helpers (also re-exported from `model`)
 - **wire** — S7 PDU encoding/parsing and S7 TSAP helpers (does not own TPKT or COTP framing)
+- **server** — In-memory S7 server for tests: Setup Communication, Read Var, Write Var
 - **interop** — Not a library API. Build-tagged test package (`go test -tags=interop ./interop/...`) for snap7-interop dual-server black-box tests
 
 There is no `transport` package. Live I/O uses go-cotp; go-tpkt is only a transitive dependency of go-cotp.
@@ -717,6 +719,48 @@ func ValidateArea(area byte) error
 func ValidateRequestSyntax(syntax byte) error // → UnsupportedSyntaxError when not S7ANY
 func (r ResponseTransportSize) String() string
 ```
+
+## server
+
+In-memory S7 server for tests. One goroutine per connection; one lock over all areas, so each job reads or changes memory as one step.
+
+```go
+func New(cfg Config) (*Server, error)
+func (s *Server) RegisterDB(number int, data []byte, opts AreaOptions) error  // 1..65535; copies data
+func (s *Server) RegisterArea(area Area, data []byte, opts AreaOptions) error // AreaInputs, AreaOutputs, AreaMerkers
+func (s *Server) Read(area Area, db, start, size int) ([]byte, error)         // host side, a copy
+func (s *Server) Write(area Area, db, start int, data []byte) error           // host side; ReadOnly does not apply
+func (s *Server) Serve(ctx context.Context, ln net.Listener) error            // ErrServerClosed after Close, ctx.Err() when ctx ends
+func (s *Server) ListenAndServe(ctx context.Context, address string) error
+func (s *Server) Close() error                                                // closes listeners and connections, waits
+
+type Config struct {
+    MaxPDUSize       int           // 240..4096, default 480: the largest PDU Setup Communication grants
+    MaxConnections   int           // default 32; more are closed on accept
+    HandshakeTimeout time.Duration // COTP connect, default 5s
+    IdleTimeout      time.Duration // close a connection with no request for this long; 0 = none
+    Logger           *slog.Logger  // nil = silent
+}
+type AreaOptions struct{ ReadOnly bool }
+type Area byte // AreaInputs, AreaOutputs, AreaMerkers, AreaDB
+const MinPDUSize, MaxPDUSize, DefaultPDUSize, DefaultMaxConns, DefaultHandshake, MaxAreaSize
+var ErrServerClosed, ErrUnknownArea, ErrAreaExists, ErrOutOfRange
+```
+
+Protocol behaviour follows the Snap7 server (SCADACS/snap7 f6ff903, used by snap7-interop):
+
+| Request | Answer |
+|---|---|
+| Setup Communication | PDU size = request clamped into 240..`MaxPDUSize`; AmQ calling and called echoed |
+| Read Var | Up to 20 items (more are dropped). BIT `0x03` (length 1 bit), BYTE/WORD/DWORD `0x04` (bits), INT/DINT `0x05` (bits), REAL `0x07` (bytes), CHAR `0x09` (bytes). An item past the negotiated PDU: code `0x85` |
+| Write Var | One code per item; more than 20 items closes the connection |
+| Item codes | `0x0A` unknown area or DB, item not S7ANY, write to a read-only area; `0x05` zero count, more than one bit, unaligned start, span past the end, unknown transport size on a read; `0x06` unknown transport size on a write; `0x07` data length unequal to the addressed size |
+| Other jobs, user data | No answer, connection kept |
+| Malformed PDU (lengths, ROSCTR, item layout) | Connection closed |
+
+Any rack, slot and TSAP is accepted. A zero-count item is refused with `0x05`: Snap7 answers it from its buffer.
+
+Server-side codec in `wire`: `ParseSetupCommRequest`, `EncodeSetupCommResponse`, `ParseReadVarRequest`, `ParseWriteVarRequest` (`VarSpec`, `WriteVarData`), `EncodeReadVarResponse` (`ReadVarResult`, `ReadVarResultSize`), `EncodeWriteVarResponse`, `EncodeAckData`, `ErrMalformedRequest`, `AckDataHeaderSize` and the data transport sizes `DataTransportSizeByte`, `DataTransportSizeInt`, `DataTransportSizeReal`, `DataTransportSizeOctet`.
 
 ## Related docs
 

@@ -1,5 +1,18 @@
 # go-s7comm Releases
 
+## v0.10.0
+
+**Date:** unreleased
+**Previous release:** v0.9.0
+
+### Added
+
+- Package `server`: an in-memory S7 server for tests. It holds data blocks, inputs, outputs and markers (`RegisterDB`, `RegisterArea`, optionally read-only) and answers Setup Communication, Read Var and Write Var on ISO-on-TCP through go-cotp, with the PDU negotiation, item return codes and response transport sizes of the Snap7 server. `Serve`, `ListenAndServe`, `Close`, host-side `Read` and `Write`, `Config` with PDU size, connection limit, handshake and idle timeouts and an optional `*slog.Logger`. Other jobs and user data get no answer; a malformed PDU closes the connection.
+- `wire` server-side codec: `ParseSetupCommRequest`, `EncodeSetupCommResponse`, `ParseReadVarRequest`, `ParseWriteVarRequest`, `EncodeReadVarResponse`, `ReadVarResultSize`, `EncodeWriteVarResponse`, `EncodeAckData`, types `VarSpec`, `WriteVarData`, `ReadVarResult`, `ErrMalformedRequest`, `AckDataHeaderSize` and the data transport sizes `DataTransportSizeByte`, `DataTransportSizeInt`, `DataTransportSizeReal`, `DataTransportSizeOctet`.
+- Tests: the client against the server on loopback, item codes from hand-built PDUs, hostile sockets, goroutine leak checks. New fuzz targets: `FuzzHandle`, `FuzzParseReadVarRequest`, `FuzzParseWriteVarRequest`, `FuzzParseSetupCommRequest`.
+
+---
+
 ## v0.9.0
 
 **Date:** 2026-11-03

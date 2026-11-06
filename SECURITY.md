@@ -32,6 +32,10 @@ Classic S7comm runs over ISO-on-TCP (port 102) with no authentication and no enc
 - **Writes act on a running process**: `WriteArea`, `WriteDB`, `WriteBit` and `WriteDBBit` change PLC memory immediately. Validate addresses and values in your application, and test against a simulator rather than production equipment
 - `UploadBlock` and `ReadDiagBuffer` return program code and diagnostic history; treat the results as sensitive
 
+### The Test Server
+
+Package `server` lets anyone who reaches its port read and write all of its memory, like the protocol itself. It is for tests: bind it to loopback or an isolated test network. `MaxConnections` (default 32), `HandshakeTimeout` (5 s) and `IdleTimeout` (off by default) bound what one peer can hold; set `IdleTimeout` on a shared network. Its request decoders and handler are fuzzed.
+
 ### Scanning and Probing
 
 `Discover`, `ProbeRackSlots`, `ProbeReadableRanges` and `CompareRead` open many connections or issue many requests. Only use them on systems you are authorised to scan.
@@ -45,4 +49,4 @@ Classic S7comm runs over ISO-on-TCP (port 102) with no authentication and no enc
 
 ### Input Handling
 
-- Received PDUs are parsed by the `wire` package, which checks lengths before use. The S7 header, read-var, SZL and upload response parsers and the TPDU inspector are fuzzed
+- Received PDUs are parsed by the `wire` package, which checks lengths before use. The S7 header, read-var, SZL and upload response parsers, the TPDU inspector and the server-side request decoders are fuzzed
