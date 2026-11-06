@@ -1,5 +1,27 @@
 # go-s7comm Releases
 
+## v0.10.0
+
+**Date:** unreleased
+**Previous release:** v0.9.0
+
+### Fixed
+
+- Read Var answers with data transport size DINTEGER (`0x06`), REAL (`0x07`) or OCTET STRING (`0x09`) were decoded with their length in bits, so a 4-byte REAL came back as 1 byte. `wire.NormalizeResponseDataLength` now follows the Siemens units as Wireshark's s7comm dissector reads them: bits for BYTE/WORD/DWORD (`0x04`) and INTEGER (`0x05`), bytes for `0x06`, `0x07` and `0x09`, one byte for BIT (`0x03`). The client's own reads use only BYTE and BIT and are not affected.
+
+### Changed
+
+- `wire.NormalizeResponseDataLength` refuses transport sizes that are not data transport sizes (`0x01`, `0x02`, `0x08`, `0x0A`..`0x0F`, `0x1C`, `0x1D`, 30..32). They were request transport sizes and S7-200 types copied into the response table; an answer carrying one is now a protocol error instead of being read with a guessed length.
+- `ResponseTransportSize.String()` gives the data transport size names (`NULL`, `BIT`, `BYTE/WORD/DWORD`, `INTEGER`, `DINTEGER`, `REAL`, `OCTET STRING`); other values print in hex. The `RespTransportSize*` constants are deprecated (values unchanged) in favour of `DataTransportSize*`.
+
+### Added
+
+- Package `server`: an in-memory S7 server for tests. It holds data blocks, inputs, outputs and markers (`RegisterDB`, `RegisterArea`, optionally read-only) and answers Setup Communication, Read Var and Write Var on ISO-on-TCP through go-cotp, with the item return codes, header errors and data transport sizes Siemens defines (as Wireshark's s7comm dissector lists them). `Serve`, `ListenAndServe`, `Close`, host-side `Read` and `Write`, `Config` with PDU size, connection limit, handshake and idle timeouts and an optional `*slog.Logger`. Other jobs and user data get error `0x8104`; an answer past the PDU gets `0x8500`; a PDU whose header cannot be read closes the connection.
+- `wire` server-side codec: `ParseSetupCommRequest`, `EncodeSetupCommResponse`, `ParseReadVarRequest`, `ParseWriteVarRequest`, `EncodeReadVarResponse`, `ReadVarResultSize`, `EncodeWriteVarResponse`, `EncodeAckData`, types `VarSpec`, `WriteVarData`, `ReadVarResult`, `ErrMalformedRequest`, `AckDataHeaderSize` and the data transport sizes `DataTransportSizeByte`, `DataTransportSizeInt`, `DataTransportSizeDInt`, `DataTransportSizeReal`, `DataTransportSizeOctet`.
+- Tests: the client against the server on loopback, item codes from hand-built PDUs, hostile sockets, goroutine leak checks. New fuzz targets: `FuzzHandle`, `FuzzParseReadVarRequest`, `FuzzParseWriteVarRequest`, `FuzzParseSetupCommRequest`.
+
+---
+
 ## v0.9.0
 
 **Date:** 2026-11-03

@@ -19,11 +19,15 @@ CI runs on Linux only. See [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md#platf
 
 ## End-to-end suite
 
-The module has no S7 server of its own. `e2e/` holds a simulated PLC for its tests (`e2e/plc_test.go`): it keeps memory and answers by decoding the requests, over TCP loopback and the real COTP and TPKT stack. The suite uses the public API only: connect and PDU negotiation, write then read back in the DB and other areas, bits, transfers larger than the PDU, CPU state, refused addresses, a silent peer, a peer that hangs up followed by a reconnect, a foreign response, concurrent use of a client, and strict rack/slot probing. `e2e/hostile_test.go` corrupts every answer to a job with a seeded generator (flipped bytes, cuts, trailing bytes, lying parameter, data, item count and item length fields, overlong items) over 400 mixed calls: each call must return within its deadline, never panic, never return more bytes than asked, and leave no goroutine behind. It is written from this library's reading of the protocol, so it proves the client's behaviour and not conformance: that is what `make interop` is for. The scripted fake server in `client/fake_server_helpers_test.go` covers malformed answers in the unit tier.
+`e2e/` holds a simulated PLC for its tests (`e2e/plc_test.go`): it keeps memory and answers by decoding the requests, over TCP loopback and the real COTP and TPKT stack. The suite uses the public API only: connect and PDU negotiation, write then read back in the DB and other areas, bits, transfers larger than the PDU, CPU state, refused addresses, a silent peer, a peer that hangs up followed by a reconnect, a foreign response, concurrent use of a client, and strict rack/slot probing. `e2e/hostile_test.go` corrupts every answer to a job with a seeded generator (flipped bytes, cuts, trailing bytes, lying parameter, data, item count and item length fields, overlong items) over 400 mixed calls: each call must return within its deadline, never panic, never return more bytes than asked, and leave no goroutine behind. It is written from this library's reading of the protocol, so it proves the client's behaviour and not conformance: that is what `make interop` is for. The scripted fake server in `client/fake_server_helpers_test.go` covers malformed answers in the unit tier.
+
+## Server tests
+
+`server/` tests the server three ways. Through this module's client on loopback: every area, bits, refusals, a read larger than the PDU, PDU negotiation, eight concurrent clients, reconnect with memory kept, the connection limit and the idle timeout. With hand-built PDUs: the exact item codes and transport sizes of the table in [API.md](API.md#server), 25 items, answers past the PDU (`0x8500`), jobs and user data not implemented (`0x8104`) and malformed PDUs. On raw sockets: garbage before the handshake, a malformed PDU, an unsupported job, and `Close` with connections open. `FuzzHandle` feeds arbitrary PDUs to a session and checks that every PDU with a readable header gets an answer with its PDU reference.
 
 ## Goroutine leaks
 
-`client` and `e2e` run `goleak.VerifyTestMain`: a test that leaves a goroutine behind fails the package. `go.uber.org/goleak` is a test-only dependency.
+`client`, `e2e` and `server` run `goleak.VerifyTestMain`: a test that leaves a goroutine behind fails the package. `go.uber.org/goleak` is a test-only dependency.
 
 ## Interoperability suite
 
@@ -44,7 +48,7 @@ With managed servers and no Docker, the suite skips (`interop/harness.go`). Ther
 
 ## Fuzzing
 
-Fuzz targets live in `wire/` and `model/codec/`, next to the decoders and encoders. Encoder targets check that every input is either refused with `ErrOutOfRange` or encoded with exactly its fields and consistent lengths. `make fuzz` discovers them; do not list them by name. Every new decoder of untrusted input gets a target.
+Fuzz targets live in `wire/`, `model/codec/` and `server/`, next to the decoders and encoders. Encoder targets check that every input is either refused with `ErrOutOfRange` or encoded with exactly its fields and consistent lengths. `make fuzz` discovers them; do not list them by name. Every new decoder of untrusted input gets a target.
 
 Regression procedure: when a fuzz run fails, Go writes the input to `testdata/fuzz/<FuzzName>/` in the package. Commit that file with the fix, so `go test` replays it as a seed from then on.
 

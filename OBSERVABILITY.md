@@ -31,6 +31,16 @@ c := client.New("10.0.0.1", client.WithLogger(logger))
 
 See [API.md](API.md) (Client options) for `WithLogger` / `NewSlogLogger`.
 
+## Server logging
+
+`server.Config.Logger` takes a `*slog.Logger`; nil discards everything. Attributes are low-cardinality (`remote`, `pduRef`, `function`); memory contents are never logged.
+
+| Level | Event |
+|---|---|
+| Info | listening; connection open; connection closed (with the reason) |
+| Warn | connection refused at `MaxConnections`; connection dropped on a PDU whose header cannot be read |
+| Debug | failed COTP handshake; setup communication (requested and granted PDU); job or user data not implemented (answered `0x8104`); malformed job |
+
 ## Context and cancellation
 
 Cancel and deadline behaviour (including session abort on mid-I/O cancel) is

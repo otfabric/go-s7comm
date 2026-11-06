@@ -7,6 +7,7 @@
 //   - [github.com/otfabric/go-s7comm/client] — Connect, read/write, discover, probe, SZL, blocks
 //   - [github.com/otfabric/go-s7comm/model] — memory areas, addresses, device and connection info
 //   - [github.com/otfabric/go-s7comm/wire] — S7 PDU encode/decode and TSAP helpers
+//   - [github.com/otfabric/go-s7comm/server] — in-memory S7 server for tests (DB, I, Q, M)
 //
 // Transport uses [github.com/otfabric/go-cotp] (TP0 over TPKT). This module does not
 // own TPKT framing.

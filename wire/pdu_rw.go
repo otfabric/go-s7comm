@@ -116,10 +116,18 @@ const (
 	TransportSizeReal  = 0x08
 )
 
-// ResponseTransportSize is the data transport size in a Read Var response item.
-// Distinct type to prevent using request transport size in response length normalization.
+// ResponseTransportSize is the data transport size of a Read Var answer
+// item (or a Write Var data item). It is not the request transport size of
+// an S7ANY address: use the DataTransportSize* constants for its values.
 type ResponseTransportSize byte
 
+// Deprecated: these constants copy request transport sizes (and S7-200
+// types) and are not data transport sizes; only 0x03 (BIT), 0x04, 0x05,
+// 0x06, 0x07 and 0x09 occur in an answer. Use DataTransportSizeBit,
+// DataTransportSizeByte, DataTransportSizeInt, DataTransportSizeDInt,
+// DataTransportSizeReal and DataTransportSizeOctet. Kept so that existing
+// code compiles; NormalizeResponseDataLength refuses the values that are
+// not data transport sizes.
 const (
 	RespTransportSizeBit       ResponseTransportSize = 0x01
 	RespTransportSizeByte      ResponseTransportSize = 0x02
@@ -129,19 +137,24 @@ const (
 	RespTransportSizeDWord     ResponseTransportSize = 0x06
 	RespTransportSizeDInt      ResponseTransportSize = 0x07
 	RespTransportSizeReal      ResponseTransportSize = 0x08
-	RespTransportSizeDATE      ResponseTransportSize = 0x09 // 2 bytes
-	RespTransportSizeTOD       ResponseTransportSize = 0x0A // 4 bytes (time of day)
-	RespTransportSizeTIME      ResponseTransportSize = 0x0B // 4 bytes
-	RespTransportSizeS5TIME    ResponseTransportSize = 0x0C // 2 bytes
-	RespTransportSizeDT        ResponseTransportSize = 0x0F // 8 bytes (date and time)
-	RespTransportSizeCount     ResponseTransportSize = 0x1C // COUNTER (2 bytes)
-	RespTransportSizeTimer     ResponseTransportSize = 0x1D // TIMER (2 bytes)
-	RespTransportSizeIECCount  ResponseTransportSize = 30   // IEC counter (S7-200)
-	RespTransportSizeIECTimer  ResponseTransportSize = 31   // IEC timer (S7-200)
-	RespTransportSizeHSCounter ResponseTransportSize = 32   // High-speed counter
+	RespTransportSizeDATE      ResponseTransportSize = 0x09
+	RespTransportSizeTOD       ResponseTransportSize = 0x0A
+	RespTransportSizeTIME      ResponseTransportSize = 0x0B
+	RespTransportSizeS5TIME    ResponseTransportSize = 0x0C
+	RespTransportSizeDT        ResponseTransportSize = 0x0F
+	RespTransportSizeCount     ResponseTransportSize = 0x1C
+	RespTransportSizeTimer     ResponseTransportSize = 0x1D
+	RespTransportSizeIECCount  ResponseTransportSize = 30
+	RespTransportSizeIECTimer  ResponseTransportSize = 31
+	RespTransportSizeHSCounter ResponseTransportSize = 32
 )
 
-// String returns the transport size name for logging/diagnostics (e.g. "BYTE", "DATE", "COUNTER").
+// DataTransportSizeNull is the data transport size of an item without data
+// (a refused item).
+const DataTransportSizeNull = 0x00
+
+// String returns the data transport size name as Wireshark's s7comm
+// dissector gives it (e.g. "BYTE/WORD/DWORD", "REAL"); other values in hex.
 func (r ResponseTransportSize) String() string {
 	if s, ok := responseTransportSizeNames[r]; ok {
 		return s
@@ -150,14 +163,13 @@ func (r ResponseTransportSize) String() string {
 }
 
 var responseTransportSizeNames = map[ResponseTransportSize]string{
-	RespTransportSizeBit: "BIT", RespTransportSizeByte: "BYTE", RespTransportSizeChar: "CHAR",
-	RespTransportSizeWord: "WORD", RespTransportSizeInt: "INT", RespTransportSizeDWord: "DWORD",
-	RespTransportSizeDInt: "DINT", RespTransportSizeReal: "REAL",
-	RespTransportSizeDATE: "DATE", RespTransportSizeTOD: "TOD", RespTransportSizeTIME: "TIME",
-	RespTransportSizeS5TIME: "S5TIME", RespTransportSizeDT: "DATE_AND_TIME",
-	RespTransportSizeCount: "COUNTER", RespTransportSizeTimer: "TIMER",
-	RespTransportSizeIECCount: "IEC_COUNTER", RespTransportSizeIECTimer: "IEC_TIMER",
-	RespTransportSizeHSCounter: "HS_COUNTER",
+	DataTransportSizeNull:  "NULL",
+	DataTransportSizeBit:   "BIT",
+	DataTransportSizeByte:  "BYTE/WORD/DWORD",
+	DataTransportSizeInt:   "INTEGER",
+	DataTransportSizeDInt:  "DINTEGER",
+	DataTransportSizeReal:  "REAL",
+	DataTransportSizeOctet: "OCTET STRING",
 }
 
 // S7AnyAddress is a specification of an S7 variable address
@@ -319,25 +331,19 @@ type ReadVarItem struct {
 	Data             []byte // Normalized payload bytes (only when ReturnCode == RetCodeSuccess)
 }
 
-// NormalizeResponseDataLength converts the raw length field of a Read Var response item
-// to payload byte count. Use ResponseTransportSize only; do not pass request transport size.
+// NormalizeResponseDataLength converts the length field of a Read Var
+// answer item to its payload byte count. The field counts bits for
+// BYTE/WORD/DWORD (0x04) and INTEGER (0x05), and bytes for DINTEGER (0x06),
+// REAL (0x07) and OCTET STRING (0x09), as Wireshark's s7comm dissector
+// reads it. A BIT item (0x03) carries one bit in one byte; its length,
+// normally 1, is rounded up to whole bytes. Any other transport size is an
+// error.
 func NormalizeResponseDataLength(transportSize ResponseTransportSize, rawLength uint16) (payloadBytes int, err error) {
 	switch transportSize {
-	case RespTransportSizeBit, RespTransportSizeChar, RespTransportSizeWord, RespTransportSizeInt,
-		RespTransportSizeDWord, RespTransportSizeDInt, RespTransportSizeReal:
+	case DataTransportSizeBit, DataTransportSizeByte, DataTransportSizeInt:
 		return (int(rawLength) + 7) / 8, nil
-	case RespTransportSizeByte:
+	case DataTransportSizeDInt, DataTransportSizeReal, DataTransportSizeOctet:
 		return int(rawLength), nil
-	case RespTransportSizeDATE, RespTransportSizeS5TIME, RespTransportSizeCount, RespTransportSizeTimer,
-		RespTransportSizeIECCount, RespTransportSizeIECTimer, RespTransportSizeHSCounter:
-		// 2-byte types (or same bit-length formula)
-		return (int(rawLength) + 7) / 8, nil
-	case RespTransportSizeTOD, RespTransportSizeTIME:
-		// 4-byte types
-		return (int(rawLength) + 7) / 8, nil
-	case RespTransportSizeDT:
-		// 8-byte date-time
-		return (int(rawLength) + 7) / 8, nil
 	default:
 		return 0, &S7Error{Message: "unknown response transport size 0x" + hexByte(byte(transportSize))}
 	}

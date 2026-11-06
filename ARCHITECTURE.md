@@ -21,9 +21,12 @@ The arrows follow the import graph (`go list -f '{{.Imports}}' ./...`).
              go-tpkt  (TPKT framing; a dependency of go-cotp only)
 ```
 
+`server` (the in-memory test server) imports `wire` and go-cotp, like `client`, and nothing else of this module.
+
 - **`client`** owns the connection: TCP dial, COTP connect through go-cotp, S7 setup communication, and every request/response exchange.
 - **`wire`** encodes and parses S7 PDUs and TSAPs. It performs no I/O. It is strict on framing and declared lengths and leaves semantic interpretation to `client` and `model` ([wire/doc.go](wire/doc.go)).
 - **`model`** holds transport-agnostic value types. `model/codec` is its only module dependency.
+- **`server`** accepts COTP connections through go-cotp and answers jobs with the `wire` server codec from memory it holds. It does not import `client`.
 - **`interop`** carries the build tag `interop` and is excluded from normal builds. It uses `client`, `model` and `wire` through their public API.
 
 The root package holds documentation only. Applications import the subpackages.
@@ -45,6 +48,8 @@ A `Client` starts no goroutine of its own. Goroutines exist only in the multi-ta
 | `CompareRead` | one per candidate, each with its own `Client` | semaphore of `Parallelism` (default 1) |
 
 Context behaviour, including why cancelling during I/O aborts the session, is in [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
+
+A `server.Server` runs one goroutine per accepted connection, bounded by `MaxConnections`, plus the caller's `Serve`. One `sync.RWMutex` guards every area: a Read Var job holds it for reading, a Write Var job for writing, so a multi-item job is one step. `Close` closes listeners and connections and waits for every connection goroutine.
 
 ## Platform backends
 

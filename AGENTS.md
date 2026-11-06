@@ -2,7 +2,7 @@
 
 ## What this is
 
-Pure Go client for the classic Siemens S7 communication protocol on [go-cotp](https://github.com/otfabric/go-cotp): read/write, discovery, rack/slot probing, SZL diagnostics and block upload. Consumed by [s7commctl](https://github.com/otfabric/s7commctl). Profile: **protocol-library**. Nothing is certified; see LIMITATIONS.md.
+Pure Go client for the classic Siemens S7 communication protocol on [go-cotp](https://github.com/otfabric/go-cotp): read/write, discovery, rack/slot probing, SZL diagnostics and block upload. Package `server` is an in-memory S7 server for tests (setup, Read Var, Write Var, with the Siemens item and error codes). Consumed by [s7commctl](https://github.com/otfabric/s7commctl). Profile: **protocol-library**. Nothing is certified; see LIMITATIONS.md.
 
 ## Organisation standards
 

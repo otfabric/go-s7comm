@@ -29,6 +29,7 @@ Error and result semantics (when to use `errors.As` / `ReadResult.Status`, CLI e
   - [PDUs](#pdus)
   - [Inspection and errors](#inspection-and-errors)
   - [Diagnostic helpers](#diagnostic-helpers)
+- [server](#server)
 - [Related docs](#related-docs)
 
 ## Packages
@@ -37,6 +38,7 @@ Error and result semantics (when to use `errors.As` / `ReadResult.Status`, CLI e
 - **model** — Domain data types, areas, value encoders/decoders, device and fingerprint structures
 - **model/codec** — Encode/decode helpers (also re-exported from `model`)
 - **wire** — S7 PDU encoding/parsing and S7 TSAP helpers (does not own TPKT or COTP framing)
+- **server** — In-memory S7 server for tests: Setup Communication, Read Var, Write Var
 - **interop** — Not a library API. Build-tagged test package (`go test -tags=interop ./interop/...`) for snap7-interop dual-server black-box tests
 
 There is no `transport` package. Live I/O uses go-cotp; go-tpkt is only a transitive dependency of go-cotp.
@@ -637,7 +639,7 @@ func EncodeReadVarBitRequest(pduRef uint16, addr S7AnyBitAddress) ([]byte, error
 func EncodeWriteVarBitRequest(pduRef uint16, addr S7AnyBitAddress, value bool) ([]byte, error)
 func DecodeAsBit(item ReadVarItem) (bool, error)
 
-func NormalizeResponseDataLength(transportSize ResponseTransportSize, rawLength uint16) (int, error)
+func NormalizeResponseDataLength(transportSize ResponseTransportSize, rawLength uint16) (int, error) // bits for 0x04/0x05, bytes for 0x06/0x07/0x09, BIT 0x03 one byte; others refused
 
 func EncodeSZLRequest(pduRef, szlID, szlIndex uint16) []byte
 func ParseSZLResponse(data []byte) (*SZLResponse, error)
@@ -717,6 +719,49 @@ func ValidateArea(area byte) error
 func ValidateRequestSyntax(syntax byte) error // → UnsupportedSyntaxError when not S7ANY
 func (r ResponseTransportSize) String() string
 ```
+
+## server
+
+In-memory S7 server for tests. One goroutine per connection; one lock over all areas, so each job reads or changes memory as one step.
+
+```go
+func New(cfg Config) (*Server, error)
+func (s *Server) RegisterDB(number int, data []byte, opts AreaOptions) error  // 1..65535; copies data
+func (s *Server) RegisterArea(area Area, data []byte, opts AreaOptions) error // AreaInputs, AreaOutputs, AreaMerkers
+func (s *Server) Read(area Area, db, start, size int) ([]byte, error)         // host side, a copy
+func (s *Server) Write(area Area, db, start int, data []byte) error           // host side; ReadOnly does not apply
+func (s *Server) Serve(ctx context.Context, ln net.Listener) error            // ErrServerClosed after Close, ctx.Err() when ctx ends
+func (s *Server) ListenAndServe(ctx context.Context, address string) error
+func (s *Server) Close() error                                                // closes listeners and connections, waits
+
+type Config struct {
+    MaxPDUSize       int           // 240..4096, default 480: the largest PDU Setup Communication grants
+    MaxConnections   int           // default 32; more are closed on accept
+    HandshakeTimeout time.Duration // COTP connect, default 5s
+    IdleTimeout      time.Duration // close a connection with no request for this long; 0 = none
+    Logger           *slog.Logger  // nil = silent
+}
+type AreaOptions struct{ ReadOnly bool }
+type Area byte // AreaInputs, AreaOutputs, AreaMerkers, AreaDB
+const MinPDUSize, MaxPDUSize, DefaultPDUSize, DefaultMaxConns, DefaultHandshake, MaxAreaSize
+var ErrServerClosed, ErrUnknownArea, ErrAreaExists, ErrOutOfRange
+```
+
+Protocol behaviour follows the codes Siemens defines, as Wireshark's s7comm dissector (`packet-s7comm.c`) lists them, and not the quirks of one implementation:
+
+| Request | Answer |
+|---|---|
+| Setup Communication | PDU size = the smaller of the request and `MaxPDUSize`; AmQ calling and called = the smaller of the request and 1 (the server works one job at a time), at least 1 |
+| Read Var | One result per item. Data transport sizes: BIT `0x03` (length 1 bit), BYTE/WORD/DWORD `0x04` (bits), INTEGER `0x05` (bits), DINTEGER `0x06` (bytes), REAL `0x07` (bytes), OCTET STRING `0x09` for CHAR (bytes). An answer that would exceed the negotiated PDU: header error `0x8500` ("wrong frames"), no items |
+| Write Var | One return code per item |
+| Item return codes | `0x0A` object does not exist (area or DB not held); `0x05` invalid address (item not S7ANY, zero count, more than one bit, a byte item not starting on a byte, a span past the end); `0x06` data type not supported (transport size not taken, e.g. timer or counter); `0x07` data type inconsistent (write data length unequal to the addressed size); `0x03` accessing the object not allowed (write to a read-only area) |
+| Other jobs (block transfer, PLC control, …), a PDU that is not a job, a malformed job | Ack-Data with header error `0x8104` ("service not implemented on the module or a frame error"), the function code as parameter |
+| User data (SZL, clock, block info, …) | User data response, same function group, subfunction and sequence number, parameter error `0x8104`, return code `0x0A` |
+| PDU whose header cannot be read (protocol ID, lengths) | Connection closed |
+
+Any rack, slot and TSAP is accepted.
+
+Server-side codec in `wire`: `ParseSetupCommRequest`, `EncodeSetupCommResponse`, `ParseReadVarRequest`, `ParseWriteVarRequest` (`VarSpec`, `WriteVarData`), `EncodeReadVarResponse` (`ReadVarResult`, `ReadVarResultSize`), `EncodeWriteVarResponse`, `EncodeAckData`, `ErrMalformedRequest`, `AckDataHeaderSize` and the data transport sizes `DataTransportSizeByte`, `DataTransportSizeInt`, `DataTransportSizeDInt`, `DataTransportSizeReal`, `DataTransportSizeOctet`.
 
 ## Related docs
 
