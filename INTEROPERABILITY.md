@@ -4,14 +4,14 @@ Evidence that go-s7comm works with S7 implementations it does not contain. Nothi
 
 ## Peers
 
-Both peers run from [snap7-interop](https://github.com/otfabric/snap7-interop) v0.3.0 (container contract 1.0, fixture schema 1.0.0), as multi-arch images pinned by digest in the [Makefile](Makefile) and [.github/workflows/interop.yml](.github/workflows/interop.yml).
+Both peers run from [snap7-interop](https://github.com/otfabric/snap7-interop) v0.6.1 (container contract 1.1, fixture schema 1.0.0), as multi-arch images pinned by digest in the [Makefile](Makefile) and [.github/workflows/interop.yml](.github/workflows/interop.yml).
 
 | Peer | Implementation | Image digest |
 |---|---|---|
-| native | Snap7, SCADACS fork at `f6ff90317ca5d54250f4dcd29209689a74e26d82` | `ghcr.io/otfabric/snap7-interop-native@sha256:66e3826813005bfacb8510ce5de33119315499325b35bf616dcf61de0506a342` |
-| python | python-snap7 3.2.1, pure-Python `Server` API, no libsnap7 | `ghcr.io/otfabric/snap7-interop-python@sha256:a53c81d7b6acb042a010fc1c9932f1f92b8c337e2555e3200938f4b0b46e3d54` |
+| native | Snap7, SCADACS fork at `f6ff90317ca5d54250f4dcd29209689a74e26d82` | `ghcr.io/otfabric/snap7-interop-native@sha256:b2ac7b3d0d8cb1dc1ac5d7e465a118eb484a2506ea67b10be6ff7579ac5d5a97` |
+| python | python-snap7 3.2.1, pure-Python `Server` API, no libsnap7 | `ghcr.io/otfabric/snap7-interop-python@sha256:7b2d7691e6f4ea95af6699025ad31946c542f237af543ccae686f6fe79b5cd5e` |
 
-Upstream versions are from snap7-interop `versions.yaml` at v0.3.0.
+Upstream versions are from snap7-interop `versions.yaml` at v0.6.1.
 
 ## Results
 
@@ -50,7 +50,7 @@ No independent peer has exercised these; they are tested only against the fake s
 
 snap7-interop publishes go-s7comm's own `server` package behind the same contract as `ghcr.io/otfabric/snap7-interop-otfabric` (adapter `otfabric`, `independentEngine: false`), built from the latest go-s7comm release. The manual **Self-interop** workflow runs this repository's client against its `:latest` and logs the digest. A pass there shows that the client and a released server of this library agree on the wire; it is not independent verification and adds nothing to the results above. One fixture step differs on purpose: the server answers a write to a read-only area with `0x03` (write-protected, the Siemens code), where both peers send `0x0A`. snap7-interop classifies it as an intentional difference ([COMPATIBILITY.md](https://github.com/otfabric/snap7-interop/blob/main/docs/COMPATIBILITY.md#write-to-a-read-only-area-0x03-and-0x0a)); the codes are compared in [ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors).
 
-Local run, 2026-11-06, linux/arm64: this branch's client against `snap7-interop-otfabric` built locally from go-s7comm v0.10.0, all 15 fixtures passed (with that known difference), next to the two peers.
+Last run, 2026-11-06: Self-interop ([run 42306998510](https://github.com/otfabric/go-s7comm/actions/runs/42306998510)), this repository's client at v0.10.1 against `snap7-interop-otfabric:v0.10.1` (`sha256:f6358529fd48eb5804612ff2cd394590b912f94c6eea0bca613629e5c5baab87`), all 15 fixtures passed, with that known difference. snap7-interop's Own stack run of the same image ([run 42306587756](https://github.com/otfabric/snap7-interop/actions/runs/42306587756), harness v0.6.1): 14 pass and 1 known difference against each reference.
 
 ## Reproduce
 

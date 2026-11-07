@@ -1,11 +1,11 @@
 # snap7-interop fixtures (vendored)
 
-Compiled fixtures from [otfabric/snap7-interop](https://github.com/otfabric/snap7-interop) **v0.3.0**.
+Compiled fixtures from [otfabric/snap7-interop](https://github.com/otfabric/snap7-interop) **v0.6.1** (byte-identical to v0.3.0).
 
 | Field | Value |
 | --- | --- |
 | Source | `fixtures/compiled/*.compiled.json` |
-| Tag | `v0.3.0` |
+| Tag | `v0.6.1` |
 | Schema | `1.0.0` |
 | Compiler | `0.1.0` |
 

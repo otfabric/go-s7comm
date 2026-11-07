@@ -8,7 +8,8 @@ None of this is a conformance claim: nothing is certified, no Siemens test has b
 
 | go-s7comm | Go | snap7-interop | Supported |
 |---|---|---|---|
-| v0.9.x | 1.26 or later (CI: 1.26 and 1.27) | v0.3.0 (contract 1.0) | latest release ([SECURITY.md](../SECURITY.md)) |
+| v0.10.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1); v0.10.0 and v0.10.1 tested against v0.3.0 (contract 1.0) | latest release ([SECURITY.md](../SECURITY.md)) |
+| v0.9.x | 1.26 or later (CI: 1.26 and 1.27) | v0.3.0 (contract 1.0) | no |
 
 ## Platforms
 

@@ -1,5 +1,22 @@
 # go-s7comm Releases
 
+## v0.10.2
+
+**Date:** 2026-11-07
+**Previous release:** v0.10.1
+
+### Changed
+
+- The interop suite pins the native and python reference images of snap7-interop v0.6.1 (container contract 1.1) instead of v0.3.0 (contract 1.0): `ghcr.io/otfabric/snap7-interop-native@sha256:b2ac7b3d…`, `ghcr.io/otfabric/snap7-interop-python@sha256:7b2d7691…`, in the Makefile, `interop/harness.go` and `interop.yml`. The upstream pins are unchanged (Snap7 SCADACS `f6ff903`, python-snap7 3.2.1), and so are the vendored compiled fixtures, which are byte-identical in both versions. Contract 1.1 documents the existing environment, ports and lifecycle and adds the otfabric image; nothing a consumer sets changed.
+
+### Documentation
+
+- INTEROPERABILITY.md, LIMITATIONS.md, README.md, `interop/testdata/README.md` and docs/FEATURE-STATUS.md (version table now lists v0.10.x) name snap7-interop v0.6.1.
+
+No library code change.
+
+---
+
 ## v0.10.1
 
 **Date:** 2026-11-06
