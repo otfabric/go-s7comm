@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: MIT
 
 // Package server is an S7 communication server for tests: it holds data
-// blocks, inputs, outputs and markers in memory and answers classic S7
+// blocks, inputs, outputs, markers, timers and counters in memory and answers classic S7
 // clients on ISO-on-TCP (RFC 1006, COTP TP0 through go-cotp).
 //
-// It answers Setup Communication, Read Var and Write Var (S7ANY items)
+// It answers Setup Communication, Read Var and Write Var (S7ANY items, and
+// DBREAD items as S7-400 CPUs take them, read only)
 // with the item return codes, header errors and data transport sizes
 // Siemens defines (STEP 7, Use of FETCH/WRITE; Wireshark's s7comm
 // dissector names them the same way): 0x0A object does not exist, 0x05 invalid address, 0x06 data type not supported, 0x07
 // data type inconsistent, 0x03 accessing the object not allowed (read-only
-// area); header error 0x8500 for an answer past the PDU and 0x8104 (service
+// area, timers, counters); header error 0x8500 for an answer past the PDU and 0x8104 (service
 // not implemented) for other jobs and user data. It accepts any rack, slot
 // and TSAP. A PDU whose header cannot be read closes the connection. It is
-// test infrastructure, not a PLC: there is no program, no timers or
-// counters, no access protection and no TLS.
+// test infrastructure, not a PLC: there is no program, timers and counters
+// do not run, and there is no access protection and no TLS. For every
+// Setup Communication, Read Var and Write Var job recorded from real
+// S7-300 and S7-400 CPUs (testdata/captures) it gives the CPU's answer
+// byte for byte.
 //
 //	srv, err := server.New(server.Config{})
 //	if err != nil { ... }

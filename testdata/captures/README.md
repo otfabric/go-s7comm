@@ -88,9 +88,9 @@ after recording); none cuts a PDU.
 | Test | Checks |
 |---|---|
 | `internal/capture` `TestCapturesMatchWireshark` | The reader (pcap and pcapng, Ethernet, IPv4, TCP reassembly, TPKT, COTP) finds per file the PDUs Wireshark 4.6.9 decodes |
-| `wire` `TestCaptures*` | Every PDU decodes; Read Var, Write Var and Setup Communication decode both ways, and every successful item has the requested length; every user data request of the five clients has the parameter layout `wire` encodes; the encoders produce requests the real clients sent, byte for byte; the CPU's item code 0x03 for a refused write |
+| `wire` `TestCaptures*`, `TestDBReadFixturesFromWinCC` | Every PDU decodes; WinCC's 84 DBREAD requests to the S7-400 parse, three of them as byte-exact fixtures; Read Var, Write Var and Setup Communication decode both ways, and every successful item has the requested length; every user data request of the five clients has the parameter layout `wire` encodes; the encoders produce requests the real clients sent, byte for byte; the CPU's item code 0x03 for a refused write |
 | `client` `TestCaptureReplay*` | The client runs against the recorded answers; a request no real client sent finds no answer and fails the test. Identify, CPU state, protection, diagnostic buffer, block counts, lists and info, and SDB 0 upload give the values in Snap7's log and Wireshark's decode |
-| `server` `TestCaptureReplayMatchesRealCPUs` | Every recorded Setup Communication, Read Var and Write Var job, sent to `server` holding the same memory, gets the CPU's answer byte for byte, apart from three pinned differences (AmQ, timer and counter areas, DBREAD) |
+| `server` `TestCaptureReplayMatchesRealCPUs` | Every recorded Setup Communication, Read Var and Write Var job, sent to `server` holding the same memory, gets the CPU's answer byte for byte: 26 setups, 3,411 reads (timers, counters and DBREAD included), 2,081 writes |
 
 Adding a capture: copy it here under the naming scheme, add its line to
 SHA256SUMS and to the tables above, and its expected counts to

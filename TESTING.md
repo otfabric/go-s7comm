@@ -24,7 +24,7 @@ CI runs on Linux only. See [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md#platf
 
 ## Server tests
 
-`server/` tests the server three ways. Through this module's client on loopback: every area, bits, refusals, a read larger than the PDU, PDU negotiation, eight concurrent clients, reconnect with memory kept, the connection limit and the idle timeout. With hand-built PDUs: the exact item codes and transport sizes of the table in [API.md](API.md#server), 25 items, answers past the PDU (`0x8500`), jobs and user data not implemented (`0x8104`) and malformed PDUs. On raw sockets: garbage before the handshake, a malformed PDU, an unsupported job, and `Close` with connections open. `FuzzHandle` feeds arbitrary PDUs to a session and checks that every PDU with a readable header gets an answer with its PDU reference.
+`server/` tests the server three ways. Through this module's client on loopback: every area, bits, refusals, a read larger than the PDU, PDU negotiation, eight concurrent clients, reconnect with memory kept, the connection limit and the idle timeout. With hand-built PDUs: the exact item codes and transport sizes of the table in [API.md](API.md#server), 25 items, answers past the PDU (`0x8500`), jobs and user data not implemented (`0x8104`) and malformed PDUs. On raw sockets: garbage before the handshake, a malformed PDU, an unsupported job, and `Close` with connections open. `FuzzHandle` feeds arbitrary PDUs to a session and checks that every PDU with a readable header gets an answer with its PDU reference. `TestChaosRealCPUJobs` mutates the jobs real clients send (DBREAD, timers, counters, mixed items, setup) 20,000 times with a seeded generator: every answer keeps its reference and the PDU size, and no client write reaches timers or counters. `TestPipelinedDBReadAndTimerJobs` sends two jobs over TCP and COTP before reading, as AmQ 2 allows, and gets both answers in order.
 
 ## Recorded traffic of real CPUs
 
@@ -32,7 +32,7 @@ CI runs on Linux only. See [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md#platf
 
 - `wire`: every PDU decodes; every Read Var, Write Var and Setup Communication decodes both ways, every successful item has the requested length, and every user data request has the parameter layout the encoders produce. `TestCapturesEncodersMatchRecordedRequests` checks that the encoders produce, byte for byte, requests the real clients sent.
 - `client`: `TestCaptureReplay*` replays a capture as a server. A request is answered only if a real client sent the same bytes, so a request built differently fails the test. The results (Identify, CPU state, protection, diagnostic buffer, block counts, lists and info, an SDB upload) are compared with Snap7's log of the session and Wireshark's decode.
-- `server`: `TestCaptureReplayMatchesRealCPUs` sends every recorded Setup Communication, Read Var and Write Var job to a server holding the memory the CPU reported, and compares the answers byte for byte. The three differences that remain are pinned in the test.
+- `server`: `TestCaptureReplayMatchesRealCPUs` sends every recorded Setup Communication, Read Var and Write Var job to a server holding the memory the CPU reported, and compares the answers byte for byte; all are identical. `wire` parses WinCC's 84 DBREAD requests to the S7-400, and three of them are parser fixtures and fuzz seeds.
 
 ## Goroutine leaks
 

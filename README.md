@@ -259,7 +259,7 @@ s7commctl probe rackslot --ip 192.168.0.10 --strict --first-confirmed
 
 ## Test server
 
-Package `server` holds data blocks, inputs, outputs and markers in memory and answers S7 clients on ISO-on-TCP. It is for tests and test benches, not a PLC: no program, no timers or counters, no access protection, no TLS.
+Package `server` holds data blocks, inputs, outputs, markers, timers and counters in memory and answers S7 clients on ISO-on-TCP. It is for tests and test benches, not a PLC: no program, timers and counters do not run, no access protection, no TLS. For every Setup Communication, Read Var and Write Var job recorded from real S7-300 and S7-400 CPUs ([testdata/captures](testdata/captures/README.md)), including the S7-400's DBREAD items, it gives the CPU's answer byte for byte.
 
 ```go
 srv, err := server.New(server.Config{}) // PDU up to 480, 32 connections

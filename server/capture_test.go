@@ -5,7 +5,6 @@ package server
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -17,13 +16,10 @@ import (
 
 // The server answers every Setup Communication, Read Var and Write Var job
 // recorded in testdata/captures as the real S7-300/S7-400 CPU did, byte
-// for byte, wherever it holds the addressed memory. The memory is seeded
-// with what the CPU answered before each read. Three differences remain
-// and are pinned here:
-//   - setup: the CPUs grant up to two parallel jobs (AmQ), the server one;
-//   - timer and counter areas (0x1C, 0x1D): the CPU holds them, the server
-//     answers 0x0A for a read and a write (the CPU refuses the write: 0x03);
-//   - DBREAD items (syntax 0xB0, S7-400): the server answers 0x05.
+// for byte: S7ANY items on DBs, inputs, outputs, markers, timers and
+// counters, the S7-400's DBREAD items, the refused timer and counter
+// writes (0x03), and the parallel jobs (AmQ) granted. The memory is seeded
+// with what the CPU answered before each read.
 
 func elemBytes(ts byte) int {
 	switch ts {
@@ -41,10 +37,19 @@ func elemBytes(ts byte) int {
 
 func held(s wire.VarSpec) bool {
 	switch s.Area {
-	case wire.AreaInputs, wire.AreaOutputs, wire.AreaMerkers, wire.AreaDB:
+	case wire.AreaInputs, wire.AreaOutputs, wire.AreaMerkers, wire.AreaDB, wire.AreaTimer, wire.AreaCounter:
 		return s.Syntax == wire.SyntaxIDS7Any
 	}
 	return false
+}
+
+// span is the byte range an S7ANY item addresses in the server's memory:
+// timers and counters by element number, two bytes each.
+func span(s wire.VarSpec) (start, size int) {
+	if s.Area == wire.AreaTimer || s.Area == wire.AreaCounter {
+		return 2 * int(s.StartBit), 2 * int(s.Count)
+	}
+	return int(s.StartBit / 8), int(s.Count) * elemBytes(s.TransportSize)
 }
 
 type exchange struct{ q, r []byte }
@@ -126,13 +131,27 @@ func replayServer(t *testing.T, xs []exchange) *session {
 			continue
 		}
 		codes := itemCodes(x.r)
+		var ranges [][]wire.DBReadArea
+		if q, _ := sections(x.q); len(q) > 0 && q[0] == wire.FuncReadVar {
+			ranges, _ = wire.ParseReadVarDBRead(q)
+		}
 		for i, s := range specsOf(x.q) {
-			if i < len(codes) && codes[i] == wire.RetCodeSuccess && held(s) {
+			if i >= len(codes) || codes[i] != wire.RetCodeSuccess {
+				continue
+			}
+			if i < len(ranges) {
+				for _, r := range ranges[i] {
+					k := key{wire.AreaDB, r.DBNumber}
+					size[k] = max(size[k], int(r.Start)+int(r.Length))
+				}
+			}
+			if held(s) {
 				k := key{s.Area, 0}
 				if s.Area == wire.AreaDB {
 					k.db = s.DBNumber
 				}
-				size[k] = max(size[k], int(s.StartBit/8)+int(s.Count)*elemBytes(s.TransportSize))
+				start, n := span(s)
+				size[k] = max(size[k], start+n)
 			}
 		}
 	}
@@ -161,11 +180,26 @@ func seed(t *testing.T, srv *Server, x exchange) {
 	if err != nil {
 		return
 	}
+	q, _ := sections(x.q)
+	ranges, _ := wire.ParseReadVarDBRead(q)
 	for i, s := range specsOf(x.q) {
-		if i >= len(items) || items[i].ReturnCode != wire.RetCodeSuccess || !held(s) {
+		if i >= len(items) || items[i].ReturnCode != wire.RetCodeSuccess {
 			continue
 		}
-		start := int(s.StartBit / 8)
+		if i < len(ranges) && ranges[i] != nil { // per range: return code, bytes
+			d := items[i].Data
+			for _, r := range ranges[i] {
+				if err := srv.Write(AreaDB, int(r.DBNumber), int(r.Start), d[1:1+int(r.Length)]); err != nil {
+					t.Fatal(err)
+				}
+				d = d[1+int(r.Length):]
+			}
+			continue
+		}
+		if !held(s) {
+			continue
+		}
+		start, _ := span(s)
 		data := items[i].Data
 		if s.TransportSize == wire.TransportSizeBit {
 			cur, err := srv.Read(Area(s.Area), int(s.DBNumber), start, 1)
@@ -185,61 +219,11 @@ func seed(t *testing.T, srv *Server, x exchange) {
 	}
 }
 
-type replayTally struct{ same, amq, timers, dbread int }
-
-// classify explains why the server's answer differs from the CPU's, or
-// fails the test.
-func classify(t *testing.T, where string, x exchange, ours []byte, tally *replayTally) {
-	t.Helper()
-	p, _ := sections(x.q)
-	if p[0] == wire.FuncSetupComm {
-		cpu, srv := append([]byte(nil), x.r...), append([]byte(nil), ours...)
-		copy(cpu[14:18], srv[14:18]) // max AmQ calling, called
-		if !bytes.Equal(cpu, srv) {
-			t.Errorf("%s: setup\n cpu % x\n ours % x", where, x.r, ours)
-		}
-		tally.amq++
-		return
-	}
-	cpuCodes, ourCodes := itemCodes(x.r), itemCodes(ours)
-	specs := specsOf(x.q)
-	if len(cpuCodes) != len(specs) || len(ourCodes) != len(specs) {
-		t.Errorf("%s: %d/%d codes for %d items\n cpu % x\n ours % x", where, len(cpuCodes), len(ourCodes), len(specs), x.r, ours)
-		return
-	}
-	kind := ""
-	for i, s := range specs {
-		switch {
-		case s.Syntax == 0xB0: // DBREAD
-			kind = "dbread"
-			if ourCodes[i] != wire.RetCodeAddressFault {
-				t.Errorf("%s item %d: DBREAD answered 0x%02x", where, i, ourCodes[i])
-			}
-		case s.Area == 0x1C || s.Area == 0x1D: // counters, timers
-			kind = "timers"
-			if ourCodes[i] != wire.RetCodeNotAvailable {
-				t.Errorf("%s item %d: timer/counter answered 0x%02x", where, i, ourCodes[i])
-			}
-		case cpuCodes[i] != ourCodes[i]:
-			t.Errorf("%s item %d (area 0x%02x): cpu 0x%02x, ours 0x%02x", where, i, s.Area, cpuCodes[i], ourCodes[i])
-		}
-	}
-	switch kind {
-	case "dbread":
-		tally.dbread++
-	case "timers":
-		tally.timers++
-	default:
-		t.Errorf("%s: answers differ in items the server holds\n cpu % x\n ours % x", where, x.r, ours)
-	}
-}
-
 func TestCaptureReplayMatchesRealCPUs(t *testing.T) {
 	files, err := filepath.Glob("../testdata/captures/*/*.pcap*")
 	if err != nil || len(files) != 25 {
 		t.Fatalf("captures: %d, %v", len(files), err)
 	}
-	var tally replayTally
 	byKind := map[byte]int{}
 	for _, f := range files {
 		convs, err := capture.ReadFile(f)
@@ -261,19 +245,16 @@ func TestCaptureReplayMatchesRealCPUs(t *testing.T) {
 				if !keep {
 					t.Fatalf("%s: dropped a job the CPU answered", f)
 				}
-				if bytes.Equal(ours, x.r) {
-					tally.same++
-					byKind[p[0]]++
+				if !bytes.Equal(ours, x.r) {
+					t.Errorf("%s conversation %d: job % x\n cpu  % x\n ours % x", filepath.Base(f), ci, x.q, x.r, ours)
 					continue
 				}
-				classify(t, fmt.Sprintf("%s conversation %d", filepath.Base(f), ci), x, ours, &tally)
+				byKind[p[0]]++
 			}
 		}
 	}
-	t.Logf("identical: %d (setup %d, read %d, write %d); differ: AmQ %d, timers/counters %d, DBREAD %d",
-		tally.same, byKind[wire.FuncSetupComm], byKind[wire.FuncReadVar], byKind[wire.FuncWriteVar], tally.amq, tally.timers, tally.dbread)
-	want := replayTally{same: 22 + 3241 + 2080, amq: 4, timers: 87, dbread: 84}
-	if tally != want || byKind[wire.FuncSetupComm] != 22 || byKind[wire.FuncReadVar] != 3241 || byKind[wire.FuncWriteVar] != 2080 {
-		t.Fatalf("tally %+v (%v), want %+v", tally, byKind, want)
+	t.Logf("identical answers: setup %d, read %d, write %d", byKind[wire.FuncSetupComm], byKind[wire.FuncReadVar], byKind[wire.FuncWriteVar])
+	if byKind[wire.FuncSetupComm] != 26 || byKind[wire.FuncReadVar] != 3411 || byKind[wire.FuncWriteVar] != 2081 {
+		t.Fatalf("identical answers %v, want setup 26, read 3411, write 2081", byKind)
 	}
 }

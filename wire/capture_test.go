@@ -345,3 +345,83 @@ func TestCapturesEncodersMatchRecordedRequests(t *testing.T) {
 		}
 	}
 }
+
+// DBREAD (syntax 0xB0) as WinCC Advanced sent it to an S7-400
+// (gymgit/wincc-advanced_s7-400_production.pcapng): 84 requests, single-
+// and multi-range. Every one parses, and every answer holds, per range, the
+// return code and exactly the requested bytes (no padding).
+func TestCapturesDBRead(t *testing.T) {
+	convs := readCapture(t, "../testdata/captures/gymgit/wincc-advanced_s7-400_production.pcapng")
+	byRanges := map[int]int{}
+	for _, pr := range jobPairs(convs[0]) {
+		_, qp, _ := splitPDU(t, pr.req.Data)
+		if qp[0] != FuncReadVar || qp[4] != SyntaxIDDBRead {
+			continue
+		}
+		ranges, err := ParseReadVarDBRead(qp)
+		if err != nil || len(ranges) != 1 {
+			t.Fatalf("frame %d: %v", pr.req.Frame, err)
+		}
+		byRanges[len(ranges[0])]++
+		_, rp, rd := splitPDU(t, pr.resp.Data)
+		items, err := ParseReadVarResponse(rp, rd)
+		if err != nil || len(items) != 1 || items[0].RawTransportSize != byte(DataTransportSizeOctet) {
+			t.Fatalf("frame %d answer: %+v, %v", pr.resp.Frame, items, err)
+		}
+		d := items[0].Data
+		for _, r := range ranges[0] {
+			if len(d) < 1+int(r.Length) || d[0] != RetCodeSuccess {
+				t.Fatalf("frame %d: answer % x for %+v", pr.resp.Frame, items[0].Data, ranges[0])
+			}
+			d = d[1+int(r.Length):]
+		}
+		if len(d) != 0 {
+			t.Fatalf("frame %d: %d bytes past the ranges", pr.resp.Frame, len(d))
+		}
+	}
+	if byRanges[1] != 43 || byRanges[2] != 1 || byRanges[3] != 40 {
+		t.Fatalf("requests by number of ranges %v, want 1:43 2:1 3:40", byRanges)
+	}
+}
+
+// Three WinCC requests byte for byte (frames 74, 1209 and 24 of the S7-400
+// capture), as parser fixtures.
+var winccDBRead = []struct {
+	frame int
+	param string
+	want  []DBReadArea
+}{
+	{74, "04 01 12 07 b0 01 01 00 83 00 08", []DBReadArea{{1, 131, 8}}},
+	{1209, "04 01 12 0c b0 02 0d 00 97 00 4c 16 00 97 01 3e", []DBReadArea{{13, 151, 76}, {22, 151, 318}}},
+	{24, "04 01 12 11 b0 03 02 00 4a 00 6c 04 00 4c 01 94 02 00 51 00 3c", []DBReadArea{{2, 74, 108}, {4, 76, 404}, {2, 81, 60}}},
+}
+
+func TestDBReadFixturesFromWinCC(t *testing.T) {
+	for _, tc := range winccDBRead {
+		ranges, err := ParseReadVarDBRead(unhex(t, tc.param))
+		if err != nil || len(ranges) != 1 || len(ranges[0]) != len(tc.want) {
+			t.Fatalf("frame %d: %+v, %v", tc.frame, ranges, err)
+		}
+		for i := range tc.want {
+			if ranges[0][i] != tc.want[i] {
+				t.Errorf("frame %d range %d = %+v, want %+v", tc.frame, i, ranges[0][i], tc.want[i])
+			}
+		}
+	}
+}
+
+func FuzzParseReadVarDBRead(f *testing.F) {
+	for _, tc := range winccDBRead {
+		f.Add(unhex(f, tc.param))
+	}
+	f.Fuzz(func(t *testing.T, param []byte) {
+		ranges, err := ParseReadVarDBRead(param)
+		specs, err2 := ParseReadVarRequest(param)
+		if (err == nil) != (err2 == nil) {
+			t.Fatalf("parsers disagree: %v / %v", err, err2)
+		}
+		if err == nil && len(ranges) != len(specs) {
+			t.Fatalf("%d range lists for %d items", len(ranges), len(specs))
+		}
+	})
+}

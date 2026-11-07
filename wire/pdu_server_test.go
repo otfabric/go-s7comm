@@ -82,10 +82,45 @@ func TestParseVarSpecsMalformed(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	// An item that is not S7ANY keeps its place, address fields zero.
-	specs, err := ParseReadVarRequest([]byte{FuncReadVar, 2, 0x12, 0x00, 0x12, 0x02, SyntaxIDDBRead, 1})
-	if err != nil || len(specs) != 2 || specs[0] != (VarSpec{}) || specs[1] != (VarSpec{Syntax: SyntaxIDDBRead}) {
+	// An item of another syntax keeps its place, address fields zero.
+	specs, err := ParseReadVarRequest([]byte{FuncReadVar, 2, 0x12, 0x00, 0x12, 0x02, SyntaxID1200Symbolic, 1})
+	if err != nil || len(specs) != 2 || specs[0] != (VarSpec{}) || specs[1] != (VarSpec{Syntax: SyntaxID1200Symbolic}) {
 		t.Fatalf("non-S7ANY items: %+v %v", specs, err)
+	}
+}
+
+// DBREAD (syntax 0xB0) as WinCC sends it to an S7-400 (wincc-advanced_s7-400_production,
+// frame 24): three ranges, DB74.DBB108 2 bytes, DB76.DBB404 4, DB81.DBB60 2.
+func TestParseReadVarDBRead(t *testing.T) {
+	param := []byte{FuncReadVar, 2,
+		0x12, 0x11, SyntaxIDDBRead, 3, 2, 0, 74, 0, 108, 4, 0, 76, 0x01, 0x94, 2, 0, 81, 0, 60,
+		0x12, 0x0A, SyntaxIDS7Any, TransportSizeByte, 0, 1, 0, 1, AreaDB, 0, 0, 0}
+	specs, err := ParseReadVarRequest(param)
+	if err != nil || len(specs) != 2 || specs[0] != (VarSpec{Syntax: SyntaxIDDBRead}) || specs[1].Area != AreaDB {
+		t.Fatalf("specs %+v, %v", specs, err)
+	}
+	ranges, err := ParseReadVarDBRead(param)
+	want := []DBReadArea{{2, 74, 108}, {4, 76, 404}, {2, 81, 60}}
+	if err != nil || len(ranges) != 2 || ranges[1] != nil || len(ranges[0]) != 3 {
+		t.Fatalf("ranges %+v, %v", ranges, err)
+	}
+	for i := range want {
+		if ranges[0][i] != want[i] {
+			t.Errorf("range %d = %+v, want %+v", i, ranges[0][i], want[i])
+		}
+	}
+	for name, bad := range map[string][]byte{
+		"no ranges":         {FuncReadVar, 1, 0x12, 0x02, SyntaxIDDBRead, 0},
+		"range cut":         {FuncReadVar, 1, 0x12, 0x06, SyntaxIDDBRead, 1, 2, 0, 74, 0},
+		"count past ranges": {FuncReadVar, 1, 0x12, 0x07, SyntaxIDDBRead, 2, 2, 0, 74, 0, 108},
+		"syntax only":       {FuncReadVar, 1, 0x12, 0x01, SyntaxIDDBRead},
+	} {
+		if _, err := ParseReadVarDBRead(bad); !errors.Is(err, ErrMalformedRequest) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := ParseReadVarDBRead([]byte{FuncWriteVar}); !errors.Is(err, ErrMalformedRequest) {
+		t.Errorf("write job accepted: %v", err)
 	}
 }
 
