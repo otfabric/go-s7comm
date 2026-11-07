@@ -29,7 +29,7 @@ FUZZTIME ?= 10s
 INTEROP_TAGS := interop
 
 # docsync release of docs-check (DOC-008).
-DOCSYNC_VERSION := v0.3.0
+DOCSYNC_VERSION := v0.3.1
 
 check: fmt lint lint-ci vuln vet test coverage-pkg-check docs-check ## Run all checks
 
