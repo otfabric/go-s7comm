@@ -12,6 +12,7 @@ Current release: **v0.7.5** (see [RELEASE.md](RELEASE.md)).
 - [Structured reads (`ReadResult`)](#structured-reads-readresult)
 - [Client sentinels and typed errors](#client-sentinels-and-typed-errors)
 - [Wire errors](#wire-errors)
+- [Server errors](#server-errors)
 - [Detection patterns](#detection-patterns)
 - [CLI contract](#cli-contract)
 - [Context, reconnect, and concurrency](#context-reconnect-and-concurrency)
@@ -172,9 +173,21 @@ Recorded evidence ([testdata/captures](testdata/captures/README.md)): a CPU 315-
 | `ErrInvalidParamLength` | Reserved: exported, but no function in this module returns it today |
 | `ErrInvalidDataLength` | Reserved: exported, but no function in this module returns it today |
 | `ErrUnknownBlockType` | `EncodeStartUploadRequest` input |
+| `ErrMalformedRequest` | Server-side decoders (`ParseSetupCommRequest`, `ParseReadVarRequest`, `ParseReadVarDBRead`, `ParseWriteVarRequest`): a job's parameter or data section does not match its declared layout |
 | `ErrOutOfRange` | Request encoder input that does not fit its wire field (`EncodeS7Header`, `EncodeS7Any`, `EncodeS7AnyBit`, Read/Write Var and Setup Communication encoders, `EncodeStartUploadRequest` block number). The client checks the same limits first and returns `*ValidationError` |
 
 COTP/TPKT transport errors come from [go-cotp](https://github.com/otfabric/go-cotp) / [go-tpkt](https://github.com/otfabric/go-tpkt), not this module.
+
+## Server errors
+
+Package `server` (the in-memory test server) returns plain errors that wrap these sentinels; match them with `errors.Is`.
+
+| Sentinel | Returned by | Meaning |
+|----------|-------------|---------|
+| `server.ErrServerClosed` | `Serve`, `ListenAndServe` | The server was closed with `Close` (`ctx.Err()` is returned instead when `ctx` ends) |
+| `server.ErrUnknownArea` | `RegisterArea`, `RegisterDB`, `Read`, `Write` | The area or DB number is not registered, or not one the server holds; `RegisterArea(AreaDB, …)` also returns it (use `RegisterDB`) |
+| `server.ErrAreaExists` | `RegisterArea`, `RegisterDB` | The area or DB number is already registered |
+| `server.ErrOutOfRange` | `RegisterArea`, `RegisterDB`, `Read`, `Write` | The area size is not in 1..`MaxAreaSize`, or the span is not inside the area |
 
 ## Detection patterns
 

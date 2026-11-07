@@ -594,7 +594,7 @@ import "github.com/otfabric/go-s7comm/wire"
 
 ### Transport stack (go-cotp)
 
-Live connections use **github.com/otfabric/go-cotp** TP0 service (`v1.0.0-rc.1`+). The client dials TCP, calls `cotp.Connect` with opaque TSAP selectors, then exchanges complete S7 PDUs as TSDUs. TPKT framing and COTP CR/CC/DT segmentation are owned by go-cotp (which depends on go-tpkt). This module does not expose a local transport package and does not import go-tpkt in production or test code.
+Live connections use **github.com/otfabric/go-cotp** TP0 service (go.mod requires `v1.2.0`). The client dials TCP, calls `cotp.Connect` with opaque TSAP selectors, then exchanges complete S7 PDUs as TSDUs. TPKT framing and COTP CR/CC/DT segmentation are owned by go-cotp (which depends on go-tpkt). This module does not expose a local transport package and does not import go-tpkt in production or test code.
 
 ### TSAP helpers
 
@@ -764,8 +764,8 @@ type Config struct {
 }
 type AreaOptions struct{ ReadOnly bool }
 type Area byte // AreaInputs, AreaOutputs, AreaMerkers, AreaDB, AreaTimers, AreaCounters (2 bytes per element; element n at byte 2n)
-const MinPDUSize, MaxPDUSize, DefaultPDUSize, DefaultMaxConns, DefaultHandshake, MaxAreaSize
-var ErrServerClosed, ErrUnknownArea, ErrAreaExists, ErrOutOfRange
+// Constants: MinPDUSize, MaxPDUSize, DefaultPDUSize, DefaultMaxConns, DefaultHandshake, MaxAreaSize
+// Errors: ErrServerClosed, ErrUnknownArea, ErrAreaExists, ErrOutOfRange (see ERRORS.md)
 ```
 
 Protocol behaviour follows the codes Siemens defines, as Wireshark's s7comm dissector (`packet-s7comm.c`) lists them, and not the quirks of one implementation. For every Setup Communication, Read Var and Write Var job recorded from real S7-300 and S7-400 CPUs in [testdata/captures](testdata/captures/README.md) it gives the CPU's answer byte for byte (`server/capture_test.go`):
