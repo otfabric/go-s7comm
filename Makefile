@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all check test test-race coverage coverage-check coverage-pkg-check cover e2e fuzz cross bench lint lint-ci vuln fmt vet clean test-interop interop
+.PHONY: help all check test test-race coverage coverage-check coverage-pkg-check cover e2e fuzz cross bench lint lint-ci vuln fmt vet clean test-interop interop docs-check
 
 # Parent otfabric/go.work may pin older modules; isolate toolchain commands.
 export GOWORK := off
@@ -28,7 +28,10 @@ FUZZTIME ?= 10s
 # Build tag for the interop package (excluded from default ./... builds).
 INTEROP_TAGS := interop
 
-check: fmt lint lint-ci vuln vet test coverage-pkg-check ## Run all checks
+# docsync release of docs-check (DOC-008).
+DOCSYNC_VERSION := v0.2.0
+
+check: fmt lint lint-ci vuln vet test coverage-pkg-check docs-check ## Run all checks
 
 test: ## Run unit tests with race detector
 	@echo "Running tests"
@@ -98,6 +101,10 @@ vet: ## Run go vet (includes -tags=interop compile of ./interop)
 	@go vet -tags=$(INTEROP_TAGS) ./...
 	@echo "Typechecking interop package (no tests run)"
 	@go test -tags=$(INTEROP_TAGS) -count=1 -run=^$$ ./interop/
+
+# The documents against the code (DOC-008): docsync, as docs-check.yml runs it.
+docs-check: ## Check that the documents agree with the code (docsync)
+	@go run github.com/otfabric/docsync@$(DOCSYNC_VERSION) check .
 
 clean: ## Remove generated coverage artifacts
 	@rm -f coverage.out coverage.html

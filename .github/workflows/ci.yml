@@ -4,8 +4,10 @@ run-name: "CI (${{ github.event_name }}) on ${{ github.ref_name }} by @${{ githu
 on:
   push:
     branches: ["**"]
+    paths-ignore: ["**/*.md"]
   pull_request:
     branches: ["**"]
+    paths-ignore: ["**/*.md"]
 
 permissions:
   contents: read
@@ -21,6 +23,7 @@ jobs:
       fuzz-time: 10s
       codecov-name: go-s7comm
       go-versions: '["1.26", "1.27"]'
+      policy-version: v1.4.1
     secrets: inherit
 
   # go-ci gates the total; this gates each package (COVER_PKG_MIN).
