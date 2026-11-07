@@ -4,14 +4,14 @@ Evidence that go-s7comm works with S7 implementations it does not contain. Nothi
 
 ## Peers
 
-Both peers run from [snap7-interop](https://github.com/otfabric/snap7-interop) v0.3.0 (container contract 1.0, fixture schema 1.0.0), as multi-arch images pinned by digest in the [Makefile](Makefile) and [.github/workflows/interop.yml](.github/workflows/interop.yml).
+Both peers run from [snap7-interop](https://github.com/otfabric/snap7-interop) v0.6.1 (container contract 1.1, fixture schema 1.0.0), as multi-arch images pinned by digest in the [Makefile](Makefile) and [.github/workflows/interop.yml](.github/workflows/interop.yml).
 
 | Peer | Implementation | Image digest |
 |---|---|---|
-| native | Snap7, SCADACS fork at `f6ff90317ca5d54250f4dcd29209689a74e26d82` | `ghcr.io/otfabric/snap7-interop-native@sha256:66e3826813005bfacb8510ce5de33119315499325b35bf616dcf61de0506a342` |
-| python | python-snap7 3.2.1, pure-Python `Server` API, no libsnap7 | `ghcr.io/otfabric/snap7-interop-python@sha256:a53c81d7b6acb042a010fc1c9932f1f92b8c337e2555e3200938f4b0b46e3d54` |
+| native | Snap7, SCADACS fork at `f6ff90317ca5d54250f4dcd29209689a74e26d82` | `ghcr.io/otfabric/snap7-interop-native@sha256:b2ac7b3d0d8cb1dc1ac5d7e465a118eb484a2506ea67b10be6ff7579ac5d5a97` |
+| python | python-snap7 3.2.1, pure-Python `Server` API, no libsnap7 | `ghcr.io/otfabric/snap7-interop-python@sha256:7b2d7691e6f4ea95af6699025ad31946c542f237af543ccae686f6fe79b5cd5e` |
 
-Upstream versions are from snap7-interop `versions.yaml` at v0.3.0.
+Upstream versions are from snap7-interop `versions.yaml` at v0.6.1.
 
 ## Results
 

@@ -296,7 +296,7 @@ Useful targets:
 
 ## Interop tests
 
-Black-box tests against both [snap7-interop](https://github.com/otfabric/snap7-interop) v0.3.0 servers (native Snap7 and pure-Python), using the full canonical fixture matrix. Servers listen on host ports **1102** (native) and **2102** (python); rack/slot is **0/2**.
+Black-box tests against both [snap7-interop](https://github.com/otfabric/snap7-interop) v0.6.1 servers (native Snap7 and pure-Python), using the full canonical fixture matrix. Servers listen on host ports **1102** (native) and **2102** (python); rack/slot is **0/2**.
 
 ```sh
 make interop
