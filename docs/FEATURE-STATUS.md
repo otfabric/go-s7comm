@@ -47,7 +47,7 @@ The module is pure Go; go-cotp and go-tpkt are its only dependencies, apart from
 | Rack/slot probe | `ProbeRackSlots` | ✅ | yes | no |
 | Discovery | `Discover` | ◐ IPv4 only, up to `/12` | validation, CIDR handling and cancellation only | no |
 | Block download, PLC start and stop | — | — | n/a | n/a |
-| Test server: setup, Read Var, Write Var on DB, I, Q, M | `server.New`, `RegisterDB`, `RegisterArea`, `Serve` | ◐ for tests; no SZL, blocks, timers, counters, DBREAD; AmQ 1 | this module's client (`server/`); recorded jobs of real CPUs, byte for byte | snap7-interop's probe, all 15 fixtures in its Own stack workflow, the read-only code `0x03` an intentional difference from the Snap7 references' `0x0A` ([LIMITATIONS.md](../LIMITATIONS.md#verification)) |
+| Test server: setup, Read Var, Write Var on DB, I, Q, M, T, C; DBREAD | `server.New`, `RegisterDB`, `RegisterArea`, `Serve` | ◐ for tests; no SZL, blocks; timers and counters do not run | this module's client (`server/`); every recorded job of real CPUs, byte for byte | snap7-interop's probe, all 15 fixtures in its Own stack workflow, the read-only code `0x03` an intentional difference from the Snap7 references' `0x0A` ([LIMITATIONS.md](../LIMITATIONS.md#verification)) |
 | TLS, password handling | — | — | n/a | n/a |
 
 Wire decoders in `wire/` have fuzz targets; see [TESTING.md](../TESTING.md#fuzzing).

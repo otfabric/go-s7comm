@@ -19,9 +19,10 @@ const (
 	errCodeFrames    = 0x00
 )
 
-// maxAmQ is the number of jobs the server processes in parallel per
-// connection: one, as it answers each job before reading the next.
-const maxAmQ = 1
+// maxAmQ is the number of jobs the server grants in parallel per
+// connection (AmQ calling and called). It answers them in the order they
+// arrive; recorded S7-300 and S7-400 CPUs grant two (testdata/captures).
+const maxAmQ = 2
 
 // session is the per-connection state: the negotiated PDU size.
 type session struct {
@@ -115,13 +116,19 @@ func (s *session) setup(ref uint16, param []byte) ([]byte, error) {
 	return wire.EncodeSetupCommResponse(ref, max(1, min(req.MaxAmqCalling, maxAmQ)), max(1, min(req.MaxAmqCalled, maxAmQ)), size)
 }
 
+// Request transport sizes of timer and counter items.
+const (
+	transportCounter = 0x1C
+	transportTimer   = 0x1D
+)
+
 // elementSize is the bytes per element of a request transport size, 0 for
-// one the server does not take (timers and counters are not held).
+// one the server does not take.
 func elementSize(transport byte) int {
 	switch transport {
 	case wire.TransportSizeBit, wire.TransportSizeByte, wire.TransportSizeChar:
 		return 1
-	case wire.TransportSizeWord, wire.TransportSizeInt:
+	case wire.TransportSizeWord, wire.TransportSizeInt, transportCounter, transportTimer:
 		return 2
 	case wire.TransportSizeDWord, wire.TransportSizeDInt, wire.TransportSizeReal:
 		return 4
@@ -137,6 +144,7 @@ type target struct {
 	size   int // bytes
 	isBit  bool
 	transp byte
+	area   Area
 }
 
 // resolve checks one item against memory and returns the item return code
@@ -163,16 +171,26 @@ func (s *session) resolve(spec wire.VarSpec) (target, byte) {
 	if per == 0 {
 		return target{}, wire.RetCodeDataTypeFault
 	}
-	t := target{reg: reg, size: per * int(spec.Count), transp: spec.TransportSize}
+	// Timers and counters only with their own transport size, and that
+	// transport size only for them (as Snap7 checks it).
+	tc := spec.TransportSize == transportTimer || spec.TransportSize == transportCounter
+	if area.timerOrCounter() != tc || (tc && spec.TransportSize != byte(area)) {
+		return target{}, wire.RetCodeAddressFault
+	}
+	t := target{reg: reg, size: per * int(spec.Count), transp: spec.TransportSize, area: area}
 	t.isBit = spec.TransportSize == wire.TransportSizeBit
 	if t.size == 0 || (t.isBit && t.size > 1) {
 		return target{}, wire.RetCodeAddressFault
 	}
-	if !t.isBit && spec.StartBit%8 != 0 {
+	switch {
+	case tc: // the address is the element number
+		t.start = 2 * int(spec.StartBit)
+	case !t.isBit && spec.StartBit%8 != 0:
 		return target{}, wire.RetCodeAddressFault
+	default:
+		t.start = int(spec.StartBit >> 3)
+		t.bit = int(spec.StartBit & 0x07)
 	}
-	t.start = int(spec.StartBit >> 3)
-	t.bit = int(spec.StartBit & 0x07)
 	if t.start+t.size > len(reg.data) {
 		return target{}, wire.RetCodeAddressFault
 	}
@@ -192,7 +210,8 @@ func lengthField(n int) uint16 {
 // readResult builds the answer item for a resolved target. Data transport
 // sizes as Wireshark's s7comm dissector names them: BIT 0x03 (length in
 // bits), BYTE/WORD/DWORD 0x04 (bits), INTEGER 0x05 (bits), DINTEGER 0x06
-// (bytes), REAL 0x07 (bytes), OCTET STRING 0x09 (bytes) for CHAR.
+// (bytes), REAL 0x07 (bytes), OCTET STRING 0x09 (bytes) for CHAR, TIMER and
+// COUNTER.
 func readResult(t target) wire.ReadVarResult {
 	src := t.reg.data[t.start : t.start+t.size]
 	r := wire.ReadVarResult{ReturnCode: wire.RetCodeSuccess, Data: append([]byte(nil), src...)}
@@ -205,7 +224,7 @@ func readResult(t target) wire.ReadVarResult {
 		r.TransportSize, r.RawLength = wire.DataTransportSizeDInt, lengthField(t.size)
 	case wire.TransportSizeReal:
 		r.TransportSize, r.RawLength = wire.DataTransportSizeReal, lengthField(t.size)
-	case wire.TransportSizeChar:
+	case wire.TransportSizeChar, transportTimer, transportCounter:
 		r.TransportSize, r.RawLength = wire.DataTransportSizeOctet, lengthField(t.size)
 	default:
 		r.TransportSize, r.RawLength = wire.DataTransportSizeByte, lengthField(t.size*8)
@@ -221,11 +240,27 @@ func (s *session) read(ref uint16, param []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	ranges, err := wire.ParseReadVarDBRead(param)
+	if err != nil {
+		return nil, err
+	}
 	s.srv.mem.mu.RLock()
 	defer s.srv.mem.mu.RUnlock()
 	used := wire.AckDataHeaderSize + 2
 	results := make([]wire.ReadVarResult, len(specs))
 	for i, spec := range specs {
+		if spec.Syntax == wire.SyntaxIDDBRead {
+			r := s.dbRead(ranges[i])
+			used += 4 + len(r.Data)
+			if i < len(specs)-1 && len(r.Data)%2 != 0 {
+				used++
+			}
+			if used > s.pduSize {
+				return wire.EncodeAckData(ref, errClassSupplies, errCodeFrames, param[:1], nil)
+			}
+			results[i] = r
+			continue
+		}
 		t, code := s.resolve(spec)
 		if code != wire.RetCodeSuccess {
 			results[i] = wire.ReadVarResult{ReturnCode: code}
@@ -251,10 +286,33 @@ func (s *session) read(ref uint16, param []byte) ([]byte, error) {
 	return wire.EncodeReadVarResponse(ref, results)
 }
 
+// dbRead answers a DBREAD item: an OCTET STRING holding, per range, the
+// return code 0xFF and the bytes read, as a recorded S7-400 answers it
+// (testdata/captures, 84 answers). A range of a DB the server does not hold
+// (0x0A) or past its end (0x05), or of no bytes (0x05), refuses the whole
+// item with that code: the recorded CPU refused no range, so how a CPU
+// marks one refused range is not known.
+func (s *session) dbRead(ranges []wire.DBReadArea) wire.ReadVarResult {
+	var data []byte
+	for _, r := range ranges {
+		reg, ok := s.srv.mem.regions[areaKey{area: AreaDB, db: r.DBNumber}]
+		if !ok || r.DBNumber == 0 {
+			return wire.ReadVarResult{ReturnCode: wire.RetCodeNotAvailable}
+		}
+		start, n := int(r.Start), int(r.Length)
+		if n == 0 || start+n > len(reg.data) {
+			return wire.ReadVarResult{ReturnCode: wire.RetCodeAddressFault}
+		}
+		data = append(append(data, wire.RetCodeSuccess), reg.data[start:start+n]...)
+	}
+	return wire.ReadVarResult{ReturnCode: wire.RetCodeSuccess, TransportSize: wire.DataTransportSizeOctet, RawLength: lengthField(len(data)), Data: data}
+}
+
 // write answers Write Var with one return code per item: refusals as in
-// resolve, 0x07 "data type inconsistent" for data whose length is not the
-// addressed size, 0x03 "accessing the object not allowed" for a read-only
-// area.
+// resolve (a DBREAD item, which only reads, gets 0x05), 0x07 "data type
+// inconsistent" for data whose length is not the addressed size, 0x03
+// "accessing the object not allowed" for a read-only area and for timers
+// and counters.
 func (s *session) write(ref uint16, param, data []byte) ([]byte, error) {
 	specs, items, err := wire.ParseWriteVarRequest(param, data)
 	if err != nil {
@@ -277,7 +335,7 @@ func (s *session) writeItem(spec wire.VarSpec, item wire.WriteVarData) byte {
 	if len(item.Data) != t.size {
 		return wire.RetCodeDataSizeFault
 	}
-	if t.reg.readOnly {
+	if t.reg.readOnly || t.area.timerOrCounter() {
 		return wire.RetCodeAccessFault
 	}
 	if t.isBit {

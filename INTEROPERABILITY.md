@@ -50,14 +50,17 @@ Recorded: `Interop` workflow run for commit `436a28f` on `main`, and a local `ma
 |---|---|
 | Every S7 PDU (14,393) | decodes; counts per file equal Wireshark 4.6.9 |
 | Read Var answers of the CPUs (9,068 items) | every successful S7ANY item has the requested length (BIT, BYTE, INT in bits; DINT, REAL, OCTET STRING in bytes) |
+| DBREAD requests of WinCC to the S7-400 (84: 43 one-range, 1 two-range, 40 three-range) | all parse (`wire.ParseReadVarDBRead`); every answer holds per range the return code and the requested bytes |
 | Requests the encoders build | byte for byte the requests of Snap7, TIA Portal and libnodave: setup, Read Var, SZL, SZL follow-up, block count, list and info, start upload, upload, end upload |
 | Client against the CPU 315-2 PN/DP's recorded answers | `Identify`, `GetCPUState`, `BlockCounts`, `UploadBlock` (SDB 0) give the values Snap7 logged in the same session; `ListBlocks` (SFC in two packets), `GetBlockInfo`, `GetProtectionLevel`, `ReadDiagBuffer` give the values Wireshark decodes |
 | Client against the IM151-8 PN/DP CPU's recorded answers | `Identify`, `GetCPUState`, `ReadDiagBuffer`, `BlockCounts`, `ListBlocks` |
-| Server, every recorded Setup Communication, Read Var and Write Var job | the CPU's answer byte for byte: 22 setups, 3,241 reads, 2,080 writes. Differences: AmQ (4 setups: the CPUs grant 2, the server 1), timer and counter areas (87 jobs), DBREAD items of the S7-400 (84 jobs) |
+| Server, every recorded Setup Communication, Read Var and Write Var job | the CPU's answer byte for byte, every one: 26 setups (AmQ as granted), 3,411 reads (including 86 of timers and counters and 84 DBREAD jobs of the S7-400), 2,081 writes (including the refused timer and counter write) |
 
 A CPU 315-2 PN/DP refuses a write to its timers and counters with item code `0x03` (object access is not allowed) while it reads them; it answers `0x0A` for a DB that does not exist ([ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors)).
 
 ## Not covered
+
+DBREAD and the server's timers and counters have no interop peer: neither Snap7 nor python-snap7 implements DBREAD, snap7-interop's fixtures have no timer or counter areas, and Snap7's server maps timer addresses differently (`Start >> 1`) and accepts the writes a real CPU refuses. Their evidence is the recorded traffic above.
 
 No independent peer and no recorded traffic covers these; they are tested only against the fake server, if at all: timers and counters through the client, `Discover`, `ProbeRackSlots`, `CompareRead`, `ProbeReadableRanges`, multi-PDU read chunking. snap7-interop lists them as deferred or client-side (`docs/go-s7comm-coverage.md`).
 

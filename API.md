@@ -748,7 +748,7 @@ In-memory S7 server for tests. One goroutine per connection; one lock over all a
 ```go
 func New(cfg Config) (*Server, error)
 func (s *Server) RegisterDB(number int, data []byte, opts AreaOptions) error  // 1..65535; copies data
-func (s *Server) RegisterArea(area Area, data []byte, opts AreaOptions) error // AreaInputs, AreaOutputs, AreaMerkers
+func (s *Server) RegisterArea(area Area, data []byte, opts AreaOptions) error // AreaInputs, AreaOutputs, AreaMerkers, AreaTimers, AreaCounters
 func (s *Server) Read(area Area, db, start, size int) ([]byte, error)         // host side, a copy
 func (s *Server) Write(area Area, db, start int, data []byte) error           // host side; ReadOnly does not apply
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error            // ErrServerClosed after Close, ctx.Err() when ctx ends
@@ -763,26 +763,28 @@ type Config struct {
     Logger           *slog.Logger  // nil = silent
 }
 type AreaOptions struct{ ReadOnly bool }
-type Area byte // AreaInputs, AreaOutputs, AreaMerkers, AreaDB
+type Area byte // AreaInputs, AreaOutputs, AreaMerkers, AreaDB, AreaTimers, AreaCounters (2 bytes per element; element n at byte 2n)
 const MinPDUSize, MaxPDUSize, DefaultPDUSize, DefaultMaxConns, DefaultHandshake, MaxAreaSize
 var ErrServerClosed, ErrUnknownArea, ErrAreaExists, ErrOutOfRange
 ```
 
-Protocol behaviour follows the codes Siemens defines, as Wireshark's s7comm dissector (`packet-s7comm.c`) lists them, and not the quirks of one implementation:
+Protocol behaviour follows the codes Siemens defines, as Wireshark's s7comm dissector (`packet-s7comm.c`) lists them, and not the quirks of one implementation. For every Setup Communication, Read Var and Write Var job recorded from real S7-300 and S7-400 CPUs in [testdata/captures](testdata/captures/README.md) it gives the CPU's answer byte for byte (`server/capture_test.go`):
 
 | Request | Answer |
 |---|---|
-| Setup Communication | PDU size = the smaller of the request and `MaxPDUSize`; AmQ calling and called = the smaller of the request and 1 (the server works one job at a time), at least 1 |
-| Read Var | One result per item. Data transport sizes: BIT `0x03` (length 1 bit), BYTE/WORD/DWORD `0x04` (bits), INTEGER `0x05` (bits), DINTEGER `0x06` (bytes), REAL `0x07` (bytes), OCTET STRING `0x09` for CHAR (bytes). An answer that would exceed the negotiated PDU: header error `0x8500` ("wrong frames"), no items |
+| Setup Communication | PDU size = the smaller of the request and `MaxPDUSize`; AmQ calling and called = the smaller of the request and 2, at least 1, as the recorded CPUs grant (WinCC asking 1/3 gets 1/2). Jobs are answered in the order they arrive |
+| Read Var | One result per item. Data transport sizes: BIT `0x03` (length 1 bit), BYTE/WORD/DWORD `0x04` (bits), INTEGER `0x05` (bits), DINTEGER `0x06` (bytes), REAL `0x07` (bytes), OCTET STRING `0x09` for CHAR, TIMER and COUNTER (bytes). An answer that would exceed the negotiated PDU: header error `0x8500` ("wrong frames"), no items |
+| Timers, counters | S7ANY with transport size TIMER `0x1D` on area T or COUNTER `0x1C` on area C, addressed by element number, 2 bytes per element. A write is refused with `0x03`, as a recorded CPU 315-2 PN/DP refuses it; the host-side `Write` sets them |
+| DBREAD items (syntax `0xB0`, S7-400) | Read only. One OCTET STRING item holding, per range, `0xFF` and the bytes read, without padding, as a recorded S7-400 answers WinCC. A range of a DB not held refuses the whole item with `0x0A`, past the end or of no bytes with `0x05` (the recordings hold no refused range). In a Write Var job: `0x05` |
 | Write Var | One return code per item |
-| Item return codes | `0x0A` object does not exist (area or DB not held); `0x05` invalid address (item not S7ANY, zero count, more than one bit, a byte item not starting on a byte, a span past the end); `0x06` data type not supported (transport size not taken, e.g. timer or counter); `0x07` data type inconsistent (write data length unequal to the addressed size); `0x03` accessing the object not allowed (write to a read-only area; Siemens 03H "Object access is not allowed", [ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors)). Snap7-based servers send `0x0A` here instead |
+| Item return codes | `0x0A` object does not exist (area or DB not held); `0x05` invalid address (item neither S7ANY nor DBREAD, zero count, more than one bit, a byte item not starting on a byte, a span past the end, a TIMER or COUNTER transport size outside its area or another transport size on timers or counters); `0x06` data type not supported (transport size not taken, e.g. DATE_AND_TIME); `0x07` data type inconsistent (write data length unequal to the addressed size); `0x03` accessing the object not allowed (write to a read-only area, a timer or a counter; Siemens 03H "Object access is not allowed", [ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors)). Snap7-based servers send `0x0A` here instead |
 | Other jobs (block transfer, PLC control, …), a PDU that is not a job, a malformed job | Ack-Data with header error `0x8104` ("service not implemented on the module or a frame error"), the function code as parameter |
 | User data (SZL, clock, block info, …) | User data response, same function group, subfunction and sequence number, parameter error `0x8104`, return code `0x0A` |
 | PDU whose header cannot be read (protocol ID, lengths) | Connection closed |
 
 Any rack, slot and TSAP is accepted.
 
-Server-side codec in `wire`: `ParseSetupCommRequest`, `EncodeSetupCommResponse`, `ParseReadVarRequest`, `ParseWriteVarRequest` (`VarSpec`, `WriteVarData`), `EncodeReadVarResponse` (`ReadVarResult`, `ReadVarResultSize`), `EncodeWriteVarResponse`, `EncodeAckData`, `ErrMalformedRequest`, `AckDataHeaderSize` and the data transport sizes `DataTransportSizeByte`, `DataTransportSizeInt`, `DataTransportSizeDInt`, `DataTransportSizeReal`, `DataTransportSizeOctet`.
+Server-side codec in `wire`: `ParseSetupCommRequest`, `EncodeSetupCommResponse`, `ParseReadVarRequest`, `ParseReadVarDBRead` (`DBReadArea`), `ParseWriteVarRequest` (`VarSpec`, `WriteVarData`), `EncodeReadVarResponse` (`ReadVarResult`, `ReadVarResultSize`), `EncodeWriteVarResponse`, `EncodeAckData`, `ErrMalformedRequest`, `AckDataHeaderSize` and the data transport sizes `DataTransportSizeByte`, `DataTransportSizeInt`, `DataTransportSizeDInt`, `DataTransportSizeReal`, `DataTransportSizeOctet`.
 
 ## Related docs
 

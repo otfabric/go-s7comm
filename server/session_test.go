@@ -86,13 +86,19 @@ func TestSetupOnlyLowers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.PDUSize != tc.want || got.MaxAmqCalling != 1 || got.MaxAmqCalled != 1 || s.pduSize != tc.want {
+		if got.PDUSize != tc.want || got.MaxAmqCalling != 2 || got.MaxAmqCalled != 2 || s.pduSize != tc.want {
 			t.Errorf("ask %d: %+v, session %d", tc.ask, got, s.pduSize)
 		}
 	}
-	param, _ := answer(t, s, must(wire.EncodeSetupCommRequest(4, 0, 0, 480)))
-	if got, _ := wire.ParseSetupCommResponse(param); got.MaxAmqCalling != 1 || got.MaxAmqCalled != 1 {
-		t.Errorf("AmQ 0 granted %+v", got)
+	for _, tc := range []struct{ calling, called, wantCalling, wantCalled int }{
+		{0, 0, 1, 1}, // at least one
+		{1, 3, 1, 2}, // WinCC to a CPU 315-2 PN/DP (testdata/captures)
+		{2, 2, 2, 2}, // WinCC to an S7-400
+	} {
+		param, _ := answer(t, s, must(wire.EncodeSetupCommRequest(4, tc.calling, tc.called, 480)))
+		if got, _ := wire.ParseSetupCommResponse(param); got.MaxAmqCalling != tc.wantCalling || got.MaxAmqCalled != tc.wantCalled {
+			t.Errorf("AmQ %d/%d granted %+v", tc.calling, tc.called, got)
+		}
 	}
 }
 
@@ -111,7 +117,8 @@ func TestReadTransportSizesAndCodes(t *testing.T) {
 		any12(wire.TransportSizeByte, 1, 1, wire.AreaDB, 3),     // unaligned
 		any12(wire.TransportSizeBit, 2, 1, wire.AreaDB, 0),      // two bits
 		any12(wire.TransportSizeByte, 0, 1, wire.AreaDB, 0),     // zero count
-		any12(0x1D, 1, 1, wire.AreaDB, 0),                       // timer transport
+		any12(0x1D, 1, 1, wire.AreaDB, 0),                       // timer transport outside the timers
+		any12(0x0F, 1, 1, wire.AreaDB, 0),                       // DATE_AND_TIME: not taken
 		any12(wire.TransportSizeDWord, 1, 0, wire.AreaMerkers, 0),
 	))
 	want := []byte{
@@ -127,6 +134,7 @@ func TestReadTransportSizesAndCodes(t *testing.T) {
 		0x05, 0x00, 0x00, 0x00,
 		0x05, 0x00, 0x00, 0x00,
 		0x05, 0x00, 0x00, 0x00,
+		0x05, 0x00, 0x00, 0x00,
 		0x06, 0x00, 0x00, 0x00,
 		0xFF, 0x04, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00,
 	}
@@ -137,7 +145,7 @@ func TestReadTransportSizesAndCodes(t *testing.T) {
 
 func TestReadNonS7AnyItem(t *testing.T) {
 	s := testSession(t, 480)
-	item := []byte{0x12, 0x07, wire.SyntaxIDDBRead, 1, 2, 3, 4, 5, 6}
+	item := []byte{0x12, 0x03, wire.SyntaxID1200Symbolic, 1, 2}
 	param, data := answer(t, s, job(1, append([]byte{wire.FuncReadVar, 2}, append(item, any12(wire.TransportSizeByte, 1, 1, wire.AreaDB, 0)...)...), nil))
 	if param[1] != 2 || !bytes.Equal(data, []byte{0x05, 0, 0, 0, 0xFF, 0x04, 0x00, 0x08, 0x01}) {
 		t.Errorf("param %x data %x", param, data)
@@ -224,7 +232,7 @@ func TestWriteCodes(t *testing.T) {
 		any12(wire.TransportSizeBit, 1, 1, wire.AreaDB, 9*8+4), dataItem(wire.DataTransportSizeBit, 1, 0x00),
 		any12(wire.TransportSizeDInt, 1, 1, wire.AreaDB, 12*8), dataItem(wire.DataTransportSizeDInt, 4, 1, 2, 3, 4),
 	))
-	want := []byte{0xFF, 0xFF, 0xFF, 0x03, 0x0A, 0x05, 0x07, 0x06, 0xFF, 0xFF}
+	want := []byte{0xFF, 0xFF, 0xFF, 0x03, 0x0A, 0x05, 0x07, 0x05, 0xFF, 0xFF} // counter transport on a DB: 0x05
 	if !bytes.Equal(data, want) {
 		t.Errorf("codes %x, want %x", data, want)
 	}
@@ -312,7 +320,7 @@ func TestMemoryAPIErrors(t *testing.T) {
 		"empty":            {srv.RegisterDB(2, nil, AreaOptions{}), ErrOutOfRange},
 		"too large":        {srv.RegisterArea(AreaMerkers, make([]byte, MaxAreaSize+1), AreaOptions{}), ErrOutOfRange},
 		"DB via area":      {srv.RegisterArea(AreaDB, []byte{1}, AreaOptions{}), ErrUnknownArea},
-		"timer area":       {srv.RegisterArea(Area(wire.AreaTimer), []byte{1}, AreaOptions{}), ErrUnknownArea},
+		"peripheral area":  {srv.RegisterArea(Area(wire.AreaPeripheral), []byte{1}, AreaOptions{}), ErrUnknownArea},
 		"read unknown":     {readErr(srv.Read(AreaMerkers, 0, 0, 1)), ErrUnknownArea},
 		"read past end":    {readErr(srv.Read(AreaDB, 1, 1, 2)), ErrOutOfRange},
 		"read negative":    {readErr(srv.Read(AreaDB, 1, -1, 1)), ErrOutOfRange},

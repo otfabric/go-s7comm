@@ -1,5 +1,36 @@
 # go-s7comm Releases
 
+## v0.12.0
+
+**Date:** 2026-11-07
+**Previous release:** v0.11.0
+
+### Summary
+
+Package `server` now answers every Setup Communication, Read Var and Write Var job recorded from real S7-300 and S7-400 CPUs ([testdata/captures](testdata/captures/README.md)) byte for byte as the CPU did: 26 setups, 3,411 reads and 2,081 writes. The three differences v0.11.0 pinned are gone: parallel jobs, timers and counters, and the S7-400's DBREAD items.
+
+### Added
+
+- `server`: `AreaTimers` and `AreaCounters`, two bytes per element (element n at byte 2n for the host-side `Read` and `Write`). Clients read them with transport size TIMER `0x1D` / COUNTER `0x1C`, addressed by element number, as OCTET STRING; their writes are refused with `0x03`, as a recorded CPU 315-2 PN/DP refuses them. A TIMER or COUNTER transport size outside its area, or another transport size on timers or counters, gets `0x05`, as Snap7's server checks it.
+- `server`: DBREAD items (syntax `0xB0`), which WinCC sends to S7-400 CPUs: read only, one OCTET STRING item holding per range `0xFF` and the bytes, without padding, as the recorded S7-400 answers. A range of a DB not held refuses the whole item with `0x0A`, past the end or of no bytes with `0x05`; the recordings hold no refused range, so that case is this library's choice. In a Write Var job a DBREAD item gets `0x05`.
+- `wire`: `ParseReadVarDBRead` and `DBReadArea`; `ParseReadVarRequest` now refuses a malformed DBREAD item (`ErrMalformedRequest`).
+
+### Changed
+
+- `server`: Setup Communication grants up to two parallel jobs (AmQ calling and called), as the recorded CPUs do (WinCC asking 1/3 gets 1/2, an S7-400 asked 2/2 grants 2/2), instead of one. Jobs are still answered in the order they arrive.
+- `server`: a TIMER or COUNTER transport size on a DB, inputs, outputs or markers now gets `0x05` instead of `0x06`.
+
+### Tests
+
+- `server/capture_test.go` requires every recorded answer byte for byte. New: DBREAD and timer/counter unit tests, a loopback test with two pipelined jobs over TCP and COTP, a seeded chaos test (20,000 mutated real-client jobs), DBREAD and timer seeds for `FuzzHandle`.
+- `wire`: WinCC's 84 DBREAD requests to the S7-400 parse, and every answer holds per range the return code and the requested bytes; frames 74, 1209 and 24 (one, two and three ranges) are byte-exact fixtures and seeds of `FuzzParseReadVarDBRead`.
+
+### Interoperability
+
+DBREAD and timers/counters have no interop peer: neither Snap7 nor python-snap7 implements DBREAD, and snap7-interop's fixtures have no timer or counter areas; Snap7's server maps timer addresses differently (`Start >> 1`) and accepts the writes a real CPU refuses. The recorded traffic is their evidence.
+
+---
+
 ## v0.11.0
 
 **Date:** 2026-11-07

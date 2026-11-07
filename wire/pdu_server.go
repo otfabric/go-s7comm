@@ -90,22 +90,54 @@ func EncodeAckData(pduRef uint16, errClass, errCode byte, param, data []byte) ([
 }
 
 // VarSpec is one item of a Read Var or Write Var job. The raw fields are as
-// on the wire; Syntax other than SyntaxIDS7Any leaves the address fields zero.
+// on the wire. An S7ANY item (SyntaxIDS7Any) fills the address fields; the
+// ranges of a DBREAD item (SyntaxIDDBRead) come from ParseReadVarDBRead;
+// any other syntax leaves the address fields zero.
 type VarSpec struct {
 	Syntax        byte
 	TransportSize byte   // request transport size (TransportSize* constants)
 	Count         uint16 // element count
 	DBNumber      uint16
 	Area          byte
-	StartBit      uint32 // 24-bit address in bits
+	StartBit      uint32 // 24-bit address in bits; for timers and counters the element number
+}
+
+// DBReadArea is one data block range of a DBREAD item (syntax 0xB0), an
+// addressing S7-400 CPUs take: up to 255 bytes of one DB from a byte offset.
+type DBReadArea struct {
+	Length   byte // bytes to read
+	DBNumber uint16
+	Start    uint16 // byte offset
+}
+
+// dbReadAreaSize is the length of one DBREAD range: length, DB, start.
+const dbReadAreaSize = 5
+
+// parseDBRead decodes the ranges of a DBREAD item: b is the item from its
+// specification type (0x12), the length, the syntax ID 0xB0, the number of
+// ranges, then the ranges.
+func parseDBRead(b []byte) ([]DBReadArea, error) {
+	if len(b) < 4 {
+		return nil, fmt.Errorf("DBREAD item of %d bytes", len(b))
+	}
+	n := int(b[3])
+	if n == 0 || len(b) != 4+n*dbReadAreaSize {
+		return nil, fmt.Errorf("DBREAD item of %d bytes for %d ranges", len(b), n)
+	}
+	out := make([]DBReadArea, n)
+	for i := range out {
+		r := b[4+i*dbReadAreaSize:]
+		out[i] = DBReadArea{Length: r[0], DBNumber: binary.BigEndian.Uint16(r[1:3]), Start: binary.BigEndian.Uint16(r[3:5])}
+	}
+	return out, nil
 }
 
 // varSpecSize is the length of one S7ANY item specification.
 const varSpecSize = 12
 
 // parseVarSpecs decodes the item list of a Read Var or Write Var parameter
-// section. An item that is not S7ANY keeps its length so the others still
-// decode; its address fields stay zero.
+// section. An item of another syntax than S7ANY or DBREAD keeps its length
+// so the others still decode; its address fields stay zero.
 func parseVarSpecs(param []byte, fn byte) ([]VarSpec, error) {
 	if len(param) < 2 {
 		return nil, fmt.Errorf("%w: parameter %d bytes, need 2", ErrMalformedRequest, len(param))
@@ -145,6 +177,11 @@ func parseVarSpecs(param []byte, fn byte) ([]VarSpec, error) {
 			spec.Area = b[8]
 			spec.StartBit = uint32(b[9])<<16 | uint32(b[10])<<8 | uint32(b[11])
 		}
+		if spec.Syntax == SyntaxIDDBRead {
+			if _, err := parseDBRead(param[off:end]); err != nil {
+				return nil, fmt.Errorf("%w: item %d: %w", ErrMalformedRequest, i, err)
+			}
+		}
 		specs = append(specs, spec)
 		off = end
 	}
@@ -157,6 +194,26 @@ func parseVarSpecs(param []byte, fn byte) ([]VarSpec, error) {
 // ParseReadVarRequest decodes the parameter section of a Read Var job.
 func ParseReadVarRequest(param []byte) ([]VarSpec, error) {
 	return parseVarSpecs(param, FuncReadVar)
+}
+
+// ParseReadVarDBRead returns, per item of a Read Var job, the ranges of a
+// DBREAD item and nil for any other item. Wireshark's s7comm dissector
+// decodes this syntax; it is seen only at S7-400 CPUs (testdata/captures).
+func ParseReadVarDBRead(param []byte) ([][]DBReadArea, error) {
+	specs, err := parseVarSpecs(param, FuncReadVar)
+	if err != nil {
+		return nil, err
+	}
+	out := make([][]DBReadArea, len(specs))
+	off := 2
+	for i, s := range specs {
+		end := off + 2 + int(param[off+1])
+		if s.Syntax == SyntaxIDDBRead {
+			out[i], _ = parseDBRead(param[off:end]) // validated by parseVarSpecs
+		}
+		off = end
+	}
+	return out, nil
 }
 
 // WriteVarData is one data item of a Write Var job.

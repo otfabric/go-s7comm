@@ -13,25 +13,37 @@ import (
 // Area is a memory area the server can hold.
 type Area byte
 
-// Areas a server can register. Timers, counters and the other S7 areas are
-// not held: a request for them is answered "object not available".
+// Areas a server can register. The other S7 areas are not held: a request
+// for them is answered "object not available".
+//
+// Timers and counters hold two bytes per element, the S5TIME or BCD count
+// value as a CPU stores it: element n is at byte 2n of the area for the
+// host-side Read and Write. Clients address them by element number with
+// the TIMER or COUNTER transport size and read them as OCTET STRING; their
+// writes are refused with 0x03, as a recorded CPU 315-2 PN/DP refuses them
+// (testdata/captures).
 const (
-	AreaInputs  Area = wire.AreaInputs  // I (process inputs)
-	AreaOutputs Area = wire.AreaOutputs // Q (process outputs)
-	AreaMerkers Area = wire.AreaMerkers // M (markers)
-	AreaDB      Area = wire.AreaDB      // DB (data blocks, by number)
+	AreaInputs   Area = wire.AreaInputs  // I (process inputs)
+	AreaOutputs  Area = wire.AreaOutputs // Q (process outputs)
+	AreaMerkers  Area = wire.AreaMerkers // M (markers)
+	AreaDB       Area = wire.AreaDB      // DB (data blocks, by number)
+	AreaTimers   Area = wire.AreaTimer   // T (timers)
+	AreaCounters Area = wire.AreaCounter // C (counters)
 )
 
-// String returns the S7 name of the area ("I", "Q", "M", "DB").
+// String returns the S7 name of the area ("I", "Q", "M", "DB", "T", "C").
 func (a Area) String() string { return wire.AreaString(byte(a)) }
 
 func (a Area) valid() bool {
 	switch a {
-	case AreaInputs, AreaOutputs, AreaMerkers, AreaDB:
+	case AreaInputs, AreaOutputs, AreaMerkers, AreaDB, AreaTimers, AreaCounters:
 		return true
 	}
 	return false
 }
+
+// timerOrCounter reports whether a holds two-byte timer or counter elements.
+func (a Area) timerOrCounter() bool { return a == AreaTimers || a == AreaCounters }
 
 // Errors of the host-side memory API.
 var (

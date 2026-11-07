@@ -19,6 +19,8 @@ func FuzzHandle(f *testing.F) {
 	f.Add(must(wire.EncodeWriteVarBitRequest(4, wire.S7AnyBitAddress{Area: wire.AreaMerkers, ByteOffset: 1, BitOffset: 3}, true)))
 	f.Add(must(wire.EncodeReadVarBitRequest(5, wire.S7AnyBitAddress{Area: wire.AreaDB, DBNumber: 2, BitOffset: 7})))
 	f.Add([]byte{0x32, 0x07, 0, 0, 0, 1, 0, 2, 0, 0, 0, 1})
+	f.Add(readJob(dbreadItem([3]int{2, 1, 0}, [3]int{4, 3, 400})))
+	f.Add(readJob(any12(transportTimer, 1, 0, wire.AreaTimer, 0)))
 	f.Fuzz(func(t *testing.T, req []byte) {
 		s := testSession(t, 240)
 		out, keep := s.handle(req)
