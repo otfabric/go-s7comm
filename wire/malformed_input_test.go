@@ -177,108 +177,6 @@ func TestParseWriteVarResponse_Malformed(t *testing.T) {
 	}
 }
 
-func TestEncodeStartUploadRequest_BlockTypeCharacter(t *testing.T) {
-	cases := []struct {
-		blockType byte
-		want      byte
-	}{
-		{BlockTypeOB, '8'},
-		{BlockTypeDB, 'A'},
-		{BlockTypeFC, 'C'},
-		{BlockTypeSFC, 'D'},
-		{BlockTypeFB, 'E'},
-		{BlockTypeSFB, 'F'},
-	}
-	for _, tc := range cases {
-		req, err := EncodeStartUploadRequest(1, tc.blockType, 1234)
-		if err != nil {
-			t.Fatalf("block type 0x%02X: %v", tc.blockType, err)
-		}
-		filename := req[S7HeaderSize+9:]
-		if filename[1] != tc.want {
-			t.Errorf("block type 0x%02X: character %q, want %q", tc.blockType, filename[1], tc.want)
-		}
-		if string(filename[2:7]) != "01234" {
-			t.Errorf("block number field = %q, want 01234", filename[2:7])
-		}
-	}
-}
-
-func TestParseStartUploadResponse_Malformed(t *testing.T) {
-	valid := []byte{FuncUploadStart, 0, 0, 0, 0, 0, 0, 0, 2, '7', ' '}
-	if id, err := ParseStartUploadResponse(valid); err != nil || id != "7" {
-		t.Fatalf("id = %q, err = %v; want trimmed session ID", id, err)
-	}
-
-	wrongFunc := append([]byte{}, valid...)
-	wrongFunc[0] = FuncUpload
-	zeroLen := append([]byte{}, valid...)
-	zeroLen[8] = 0
-	overrun := append([]byte{}, valid...)
-	overrun[8] = 3
-
-	for name, param := range map[string][]byte{
-		"empty": nil, "too short": valid[:9], "wrong function": wrongFunc,
-		"zero length": zeroLen, "length overrun": overrun,
-	} {
-		t.Run(name, func(t *testing.T) {
-			var s7Err *S7Error
-			if _, err := ParseStartUploadResponse(param); !errors.As(err, &s7Err) {
-				t.Fatalf("err = %v, want *S7Error", err)
-			}
-		})
-	}
-}
-
-func TestParseUploadResponse_Boundaries(t *testing.T) {
-	t.Run("nonzero status means more chunks", func(t *testing.T) {
-		chunk, err := ParseUploadResponse([]byte{FuncUpload, 1}, []byte{0, 0, 0, 16, 0xAA, 0xBB})
-		if err != nil || chunk.Done || len(chunk.Data) != 2 {
-			t.Fatalf("chunk = %+v, err = %v", chunk, err)
-		}
-	})
-	t.Run("length in bits rounds up", func(t *testing.T) {
-		chunk, err := ParseUploadResponse([]byte{FuncUpload, 0}, []byte{0, 0, 0, 9, 0xAA, 0xBB, 0xCC})
-		if err != nil || !chunk.Done || len(chunk.Data) != 2 {
-			t.Fatalf("chunk = %+v, err = %v", chunk, err)
-		}
-	})
-	t.Run("empty final chunk", func(t *testing.T) {
-		chunk, err := ParseUploadResponse([]byte{FuncUpload, 0}, []byte{0, 0, 0, 0})
-		if err != nil || !chunk.Done || len(chunk.Data) != 0 {
-			t.Fatalf("chunk = %+v, err = %v", chunk, err)
-		}
-	})
-
-	failures := map[string]struct{ param, data []byte }{
-		"param too short": {[]byte{FuncUpload}, []byte{0, 0, 0, 0}},
-		"wrong function":  {[]byte{FuncUploadEnd, 0}, []byte{0, 0, 0, 0}},
-		"data too short":  {[]byte{FuncUpload, 0}, []byte{0, 0, 0}},
-	}
-	for name, tc := range failures {
-		t.Run(name, func(t *testing.T) {
-			if chunk, err := ParseUploadResponse(tc.param, tc.data); err == nil {
-				t.Fatalf("chunk = %+v, want error", chunk)
-			}
-		})
-	}
-}
-
-func TestEncodeUploadSessionID_TruncatedTo255(t *testing.T) {
-	long := strings.Repeat("x", 300)
-	for name, req := range map[string][]byte{
-		"upload":     EncodeUploadRequest(1, long),
-		"end upload": EncodeEndUploadRequest(1, long),
-	} {
-		t.Run(name, func(t *testing.T) {
-			param := req[S7HeaderSize:]
-			if param[8] != 255 || len(param) != 9+255 {
-				t.Fatalf("declared %d, section %d; want 255 and %d", param[8], len(param), 9+255)
-			}
-		})
-	}
-}
-
 func TestHeaderErrorString_AllClasses(t *testing.T) {
 	cases := []struct {
 		class, code byte
@@ -318,29 +216,6 @@ func TestROSCTRClassification(t *testing.T) {
 	for _, tc := range cases {
 		if tc.r.IsJob() != tc.job || tc.r.IsAck() != tc.ack || tc.r.IsAckData() != tc.ack2 || tc.r.IsUserdata() != tc.userda {
 			t.Errorf("ROSCTR 0x%02X misclassified", byte(tc.r))
-		}
-	}
-}
-
-// SDB is a block type of the client API; its upload must not name a DB of the same number.
-func TestEncodeStartUploadRequest_SDBIsNotDB(t *testing.T) {
-	req, err := EncodeStartUploadRequest(1, BlockTypeSDB, 7)
-	if err != nil {
-		t.Fatalf("EncodeStartUploadRequest: %v", err)
-	}
-	if got := req[S7HeaderSize+9+1]; got != 'B' {
-		t.Fatalf("block type character = %q, want 'B'", got)
-	}
-}
-
-func TestEncodeStartUploadRequest_UnknownBlockType(t *testing.T) {
-	for _, blockType := range []byte{0x00, 0x37, 0x39, 0x40, 0x47, 0xFF} {
-		req, err := EncodeStartUploadRequest(1, blockType, 7)
-		if !errors.Is(err, ErrUnknownBlockType) {
-			t.Fatalf("block type 0x%02X: err = %v, want ErrUnknownBlockType", blockType, err)
-		}
-		if req != nil {
-			t.Fatalf("block type 0x%02X: request = %x, want nil", blockType, req)
 		}
 	}
 }

@@ -107,14 +107,12 @@ func buildAckData(pduRef uint16, errClass, errCode byte, param, data []byte) []b
 
 // buildSZLReply builds an SZL response whose parsed Data is exactly payload.
 func buildSZLReply(pduRef, szlID uint16, payload []byte) []byte {
-	return buildSZLResponse(pduRef, szlID, len(payload)+4, append(append([]byte{}, payload...), 0, 0, 0, 0))
+	return buildSZLResponse(pduRef, szlID, len(payload), payload)
 }
 
-// buildSZLItemError builds an SZL response carrying a non-success item return code.
+// buildSZLItemError builds an SZL response carrying a non-success return code.
 func buildSZLItemError(pduRef uint16, retCode byte) []byte {
-	resp := buildSZLResponse(pduRef, wire.SZLModuleID, 8, make([]byte, 8))
-	resp[14] = retCode
-	return resp
+	return buildUserdataResponse(pduRef, wire.UserdataGroupCPU, wire.UserdataSZL, 0, false, []byte{retCode, 0x00, 0x00, 0x00})
 }
 
 func connectScripted(t *testing.T, port int) *Client {
@@ -345,7 +343,7 @@ func TestConnect_FailedReconnectKeepsSession(t *testing.T) {
 			return buildS7SetupResponse(ref, 480)
 		},
 		func(ref uint16, _ []byte) []byte {
-			return buildSZLReply(ref, wire.SZLCPUState, []byte{0, 0, 0x08, 0})
+			return buildSZLReply(ref, wire.SZLCPUState, szlList(20, []byte{0x51, 0x44, 0xff, 0x08}))
 		})
 	c := connectScripted(t, port)
 
@@ -401,27 +399,33 @@ func TestIsProbeTimeout(t *testing.T) {
 }
 
 func TestGetProtectionLevel(t *testing.T) {
+	rec := func(level byte) []byte { return szlList(40, []byte{0, 4, 0, 1, 0, 0, 0, level, 0, 2}) }
 	cases := []struct {
 		name    string
 		payload []byte
 		want    model.ProtectionLevel
+		wantErr bool
 	}{
-		{"none", []byte{0, 0, 0, 0}, model.ProtectionNone},
-		{"write protected", []byte{0, 0, 1, 0}, model.ProtectionRead},
-		{"read/write protected", []byte{0, 0, 2, 0}, model.ProtectionReadWrite},
-		{"full", []byte{0, 0, 3, 0}, model.ProtectionFull},
-		{"upper bits masked", []byte{0, 0, 0xFE, 0}, model.ProtectionReadWrite},
-		{"payload too short", []byte{0, 0, 3}, model.ProtectionNone},
+		{"level 1: none", rec(1), model.ProtectionNone, false},
+		{"level 2: write protected", rec(2), model.ProtectionRead, false},
+		{"level 3: read/write protected", rec(3), model.ProtectionReadWrite, false},
+		{"unknown level", rec(7), model.ProtectionNone, true},
+		{"record too short", szlList(6, []byte{0, 4}), model.ProtectionNone, true},
+		{"no record", szlList(40), model.ProtectionNone, true},
+		{"list header cut", []byte{0, 0, 3}, model.ProtectionNone, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			port := startScriptedPeer(t, nil, func(ref uint16, _ []byte) []byte {
+			port := startScriptedPeer(t, nil, func(ref uint16, req []byte) []byte {
+				if idx := binary.BigEndian.Uint16(req[24:26]); idx != 4 {
+					return buildSZLItemError(ref, wire.RetCodeNotAvailable)
+				}
 				return buildSZLReply(ref, wire.SZLProtectionInfo, tc.payload)
 			})
 			c := connectScripted(t, port)
 			got, err := c.GetProtectionLevel(testContext(t))
-			if err != nil || got != tc.want {
-				t.Fatalf("got %v, %v; want %v", got, err, tc.want)
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("got %v, %v; want %v, error %v", got, err, tc.want, tc.wantErr)
 			}
 		})
 	}
@@ -431,9 +435,12 @@ func TestGetCPUState_UnrecognisedPayload(t *testing.T) {
 	cases := []struct {
 		name    string
 		payload []byte
+		wantErr bool
 	}{
-		{"unknown state byte", []byte{0, 0, 0x02, 0}},
-		{"payload too short", []byte{0, 0, 0x08}},
+		{"unknown mode", szlList(20, []byte{0x51, 0x44, 0xff, 0x00}), false},
+		{"record too short", szlList(3, []byte{0x51, 0x44, 0xff}), true},
+		{"no record", szlList(20), true},
+		{"record length 0", []byte{0, 0, 0, 1}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -442,8 +449,8 @@ func TestGetCPUState_UnrecognisedPayload(t *testing.T) {
 			})
 			c := connectScripted(t, port)
 			got, err := c.GetCPUState(testContext(t))
-			if err != nil || got != model.CPUStateUnknown {
-				t.Fatalf("got %v, %v; want unknown, nil", got, err)
+			if (err != nil) != tc.wantErr || got != model.CPUStateUnknown {
+				t.Fatalf("got %v, %v; want unknown, error %v", got, err, tc.wantErr)
 			}
 		})
 	}
@@ -471,10 +478,11 @@ func TestSZLOperations_ItemReturnCode(t *testing.T) {
 	}
 }
 
-func TestReadDiagBuffer_FixedStrideDropsTrailingPartialEntry(t *testing.T) {
-	raw := make([]byte, 45)
-	copy(raw[0:4], []byte{0x12, 0x34, 0x05, 0x06})
-	copy(raw[20:24], []byte{0xAB, 0xCD, 0x07, 0x08})
+func TestReadDiagBuffer_RecordsAndTrailingBytes(t *testing.T) {
+	raw := szlList(20,
+		[]byte{0x12, 0x34, 0x05, 0x06, 0, 0, 0, 9, 0, 0, 0, 7},
+		[]byte{0xAB, 0xCD, 0x07, 0x08})
+	raw = append(raw, 1, 2, 3) // a cut third record is not counted
 	port := startScriptedPeer(t, nil, func(ref uint16, _ []byte) []byte {
 		return buildSZLReply(ref, wire.SZLDiagBuffer, raw)
 	})
@@ -487,17 +495,17 @@ func TestReadDiagBuffer_FixedStrideDropsTrailingPartialEntry(t *testing.T) {
 	if buf.TotalCount != 2 || len(buf.Entries) != 2 {
 		t.Fatalf("entries = %d (total %d), want 2", len(buf.Entries), buf.TotalCount)
 	}
-	if e := buf.Entries[1]; e.EventID != 0xABCD || e.EventClass != 0x07 || e.Priority != 0x08 {
+	if e := buf.Entries[0]; e.EventID != 0x1234 || e.EventClass != 0x1 || e.Priority != 0x05 || e.Info1 != 9 || e.Info2 != 7 {
+		t.Fatalf("first entry = %+v", e)
+	}
+	if e := buf.Entries[1]; e.EventID != 0xABCD || e.EventClass != 0xA || e.Priority != 0x07 {
 		t.Fatalf("second entry = %+v", e)
 	}
 }
 
 func TestIdentify_PartialResults(t *testing.T) {
-	module := make([]byte, 22)
-	copy(module[2:], "6ES7 315-2EH14-0AB0")
-	component := make([]byte, 34)
-	copy(component[2:], "CPU 315-2 PN/DP")
-	copy(component[26:], "LINE1")
+	module := szlList(28, append([]byte{0x00, 0x01}, "6ES7 315-2EH14-0AB0"...))
+	component := szlList(34, append([]byte{0x00, 0x02}, "CPU 315-2 PN/DP"...), append([]byte{0x00, 0x03}, "LINE1"...))
 
 	moduleOK := func(ref uint16) []byte { return buildSZLReply(ref, wire.SZLModuleID, module) }
 	componentOK := func(ref uint16) []byte { return buildSZLReply(ref, wire.SZLComponentID, component) }
@@ -516,8 +524,8 @@ func TestIdentify_PartialResults(t *testing.T) {
 		{"module fails", failed, componentOK, true, true, "", "CPU 315-2 PN/DP"},
 		{"component fails", moduleOK, failed, true, true, "6ES7 315-2EH14-0AB0", ""},
 		{
-			"component too short", moduleOK,
-			func(ref uint16) []byte { return buildSZLReply(ref, wire.SZLComponentID, make([]byte, 33)) },
+			"component record too short", moduleOK,
+			func(ref uint16) []byte { return buildSZLReply(ref, wire.SZLComponentID, szlList(33, []byte{0, 2})) },
 			true, true, "6ES7 315-2EH14-0AB0", "",
 		},
 	}
@@ -810,7 +818,7 @@ func TestNextPDURef_SkipsZeroOnWrap(t *testing.T) {
 // Across a wrap, a response with a stale reference must still be rejected.
 func TestSendReceive_CorrelatesAcrossPDURefWrap(t *testing.T) {
 	port := startScriptedPeer(t, nil, func(ref uint16, _ []byte) []byte {
-		return buildSZLReply(ref+1, wire.SZLCPUState, []byte{0, 0, 0x08, 0})
+		return buildSZLReply(ref+1, wire.SZLCPUState, szlList(20, []byte{0x51, 0x44, 0xff, 0x08}))
 	})
 	c := connectScripted(t, port)
 	c.pduRef = 0xFFFF

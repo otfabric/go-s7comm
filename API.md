@@ -416,17 +416,26 @@ Behavior notes:
 func (c *Client) Identify(ctx context.Context) (*model.DeviceInfo, error)
 func (c *Client) GetCPUState(ctx context.Context) (model.CPUState, error)
 func (c *Client) GetProtectionLevel(ctx context.Context) (model.ProtectionLevel, error)
-func (c *Client) ReadDiagBuffer(ctx context.Context) (*model.DiagBuffer, error) // partial parsing; 20-byte stride
-func (c *Client) ReadDiagBufferRaw(ctx context.Context) ([]byte, error)        // raw SZL 0x00A0 payload
+func (c *Client) ReadDiagBuffer(ctx context.Context) (*model.DiagBuffer, error) // 20-byte records of SZL 0x00A0
+func (c *Client) ReadDiagBufferRaw(ctx context.Context) ([]byte, error)        // SZL 0x00A0 list data: record length, count, records
 
+func (c *Client) BlockCounts(ctx context.Context) (map[model.BlockType]int, error)
 func (c *Client) ListBlocks(ctx context.Context, bt model.BlockType) ([]model.BlockInfo, error)
 func (c *Client) ListAllBlocks(ctx context.Context) ([]model.BlockInfo, error)
 func (c *Client) GetBlockInfo(ctx context.Context, bt model.BlockType, num int) (*model.BlockInfo, error)
 func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (*model.BlockData, error)
 ```
 
-- **GetBlockInfo**: Best-effort; on transport/protocol failure returns `(nil, err)`; on parse failure after transport success returns partial `BlockInfo` (Type, Number) plus `err`. Invalid block number or unknown block type returns `*ValidationError`.
-- **UploadBlock**: Performs a best-effort end-upload cleanup before returning (500ms timeout); cleanup errors are not returned. Invalid block number returns `*ValidationError`.
+These are the requests Snap7, STEP 7 5.5, TIA Portal V13 and WinCC Advanced send, byte for byte, and each decodes the answers of a real CPU 315-2 PN/DP and IM151-8 PN/DP CPU recorded in [testdata/captures](testdata/captures/README.md) (`client/capture_test.go`).
+
+- **SZL reads** (`Identify`, `GetCPUState`, `GetProtectionLevel`, `ReadDiagBuffer*`): user data, CPU functions, read SZL. An answer the CPU sends in several packets ("more data follows") is collected with follow-up requests, up to 256 packets. Records are read by their index or position in the SZL list, not by searching the text.
+- **Identify**: SZL 0x0011 index 1 (order number) and index 7 (firmware, `Vx.y.z`); SZL 0x001C indexes 1 (`SystemName`), 2 (`ModuleName`), 3 (`PlantID`), 4 (`Copyright`), 5 (`SerialNumber`), 7 (`ModuleType`, and `CPUType` when it names a CPU) and 8 (`MemoryCardSerial`). `(info, err)` when one of the two lists fails, `(nil, err)` when both do.
+- **GetCPUState**: SZL 0x0424, the mode in the low nibble of the first record's `bzu-id` byte: 1–4 STOP, 5–7 STARTUP, 8–9 RUN, 10 HOLD, other UNKNOWN.
+- **GetProtectionLevel**: SZL 0x0232 index 4, `sch_rel`: Siemens level 1 → `ProtectionNone`, 2 → `ProtectionRead` (write protected), 3 → `ProtectionReadWrite`; another value is an error.
+- **ReadDiagBuffer**: per 20-byte record the event ID, its class (high nibble), the priority class, info 1 and 2, and the BCD time stamp as hex text.
+- **BlockCounts, ListBlocks, GetBlockInfo**: user data, block functions (count, list of one type, block info). `ListBlocks` collects every packet of a long list.
+- **GetBlockInfo**: on transport/protocol failure returns `(nil, err)`; on parse failure after transport success returns partial `BlockInfo` (Type, Number) plus `err`. A block number outside 0..99999 or an unknown block type returns `*ValidationError`.
+- **UploadBlock**: start upload with the file name `_0<type><5 digits>A`, upload by the 4-byte upload ID the CPU assigns, end upload. The result is the whole block as the CPU sends it (header, body, footer). Performs a best-effort end-upload cleanup before returning (500ms timeout); cleanup errors are not returned. Invalid block number returns `*ValidationError`.
 
 ### Client options
 
@@ -520,6 +529,7 @@ type BlockData struct { ... }
 type DeviceInfo struct {
     OrderNumber, SerialNumber, ModuleName, PlantID, Copyright string
     ModuleType, FWVersion, HWVersion, CPUType, CPUFamily      string
+    SystemName, MemoryCardSerial                              string
 }
 
 type ConnectionInfo struct {
@@ -626,7 +636,8 @@ func EncodeS7Any(addr S7AnyAddress) ([]byte, error)
 func EncodeReadVarRequest(pduRef uint16, addrs []S7AnyAddress) ([]byte, error)
 func ParseReadVarResponse(param, data []byte) ([]ReadVarItem, error)
 func EncodeWriteVarRequest(pduRef uint16, addr S7AnyAddress, value []byte) ([]byte, error)
-func ParseWriteVarResponse(param, data []byte) error
+func ParseWriteVarResponse(param, data []byte) error             // nil only when every item succeeded
+func ParseWriteVarResponseCodes(param, data []byte) ([]byte, error) // one return code per item
 
 type S7AnyBitAddress struct {
     Area       byte
@@ -641,18 +652,28 @@ func DecodeAsBit(item ReadVarItem) (bool, error)
 
 func NormalizeResponseDataLength(transportSize ResponseTransportSize, rawLength uint16) (int, error) // bits for 0x04/0x05, bytes for 0x06/0x07/0x09, BIT 0x03 one byte; others refused
 
-func EncodeSZLRequest(pduRef, szlID, szlIndex uint16) []byte
-func ParseSZLResponse(data []byte) (*SZLResponse, error)
+// User data: request parameter 00 01 12 04 11 <type|group> <subfunction> 00;
+// answers and follow-ups 00 01 12 08 12 ... (see UserdataParam).
+func EncodeUserdataRequest(pduRef uint16, group, subfunc byte, data []byte) ([]byte, error)
+func EncodeUserdataFollowUp(pduRef uint16, group, subfunc, seq byte) []byte
+func ParseUserdataParam(param []byte) (*UserdataParam, error) // Group, Subfunction, Sequence, More, ErrorCode
+func ParseUserdataData(data []byte) ([]byte, error)          // payload after return code, transport size, length
 
+func EncodeSZLRequest(pduRef, szlID, szlIndex uint16) []byte
+func ParseSZLResponse(data []byte) (*SZLResponse, error) // first packet; append follow-up payloads to Data
+
+func EncodeBlockCountRequest(pduRef uint16) []byte
+func ParseBlockCountResponse(payload []byte) ([]BlockCount, error)
 func EncodeBlockListRequest(pduRef uint16, blockType byte) []byte
-func ParseBlockListResponse(szlData []byte) ([]BlockListEntry, error)
-func ParseBlockInfoResponse(szlData []byte) (BlockInfoData, error)
-func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) ([]byte, error)
-func ParseStartUploadResponse(param []byte) (string, error)
-const MaxUploadBlockNumber = 99999 // EncodeStartUploadRequest: five-digit file name
-func EncodeUploadRequest(pduRef uint16, sessionID string) []byte // ID cut to 255 bytes
-func EncodeEndUploadRequest(pduRef uint16, sessionID string) []byte
-func ParseUploadResponse(param, data []byte) (*UploadChunk, error)
+func ParseBlockListResponse(payload []byte) ([]BlockListEntry, error) // number, flags, language per entry
+func EncodeBlockInfoRequest(pduRef uint16, blockType byte, blockNum int) ([]byte, error)
+func ParseBlockInfoResponse(payload []byte) (BlockInfoData, error)
+func EncodeStartUploadRequest(pduRef uint16, blockType byte, blockNum int) ([]byte, error) // file name _0<type><5 digits>A
+func ParseStartUploadResponse(param []byte) (StartUpload, error)                      // UploadID, Length
+const MaxUploadBlockNumber = 99999 // five-digit block address
+func EncodeUploadRequest(pduRef uint16, uploadID uint32) []byte
+func EncodeEndUploadRequest(pduRef uint16, uploadID uint32) []byte
+func ParseUploadResponse(param, data []byte) (*UploadChunk, error) // status 0x01: more data; length in bytes
 ```
 
 `EncodeS7Any` / byte read-write helpers use byte transport size and byte offsets (start address = `Start*8` bits). Bit helpers (`EncodeS7AnyBit`, `EncodeReadVarBitRequest`, `EncodeWriteVarBitRequest`, `DecodeAsBit`) use request S7ANY transport `TransportSizeBit` (`0x01`) with start = `ByteOffset*8+BitOffset` (not multiplied again). Read/Write Var data sections use `DataTransportSizeBit` (`0x03`). Only `SyntaxIDS7Any` is supported for encoding (`ValidateRequestSyntax`).

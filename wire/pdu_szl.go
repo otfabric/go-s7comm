@@ -81,37 +81,105 @@ var szlIDNames = map[uint16]string{
 	0x0524: "Specified mode transition",
 }
 
-// Userdata function codes
+// User data parameter fields. A request parameter is
+// 00 01 12 04 | method 0x11 | type and function group | subfunction | sequence;
+// a response or follow-up parameter is 00 01 12 08 | method 0x12 | type and
+// group | subfunction | sequence | data unit reference | last data unit |
+// error code (2 bytes). This is the layout Snap7, STEP 7 5.5, TIA Portal V13,
+// WinCC Advanced and libnodave send and S7-300/S7-400 CPUs answer
+// (testdata/captures).
 const (
-	UserdataReq      = 0x11
-	UserdataRes      = 0x12
-	UserdataSubParam = 0x44 // With parameters
-	UserdataSZL      = 0x01 // SZL read
+	UserdataReq = 0x11 // method: request
+	UserdataRes = 0x12 // method: response, and a client's follow-up request
+	// UserdataSubParam is the type and function group byte of an SZL read
+	// request: type 4 (request) and group 4 (CPU functions).
+	UserdataSubParam = 0x44
+	UserdataSZL      = 0x01 // subfunction: read SZL
+
+	UserdataTypeRequest  = 0x40 // type nibble of a request (high bits of the type/group byte)
+	UserdataTypeResponse = 0x80 // type nibble of a response
+	UserdataGroupBlock   = 0x03 // function group: block functions
+	UserdataGroupCPU     = 0x04 // function group: CPU functions (SZL)
+
+	UserdataBlockCount = 0x01 // block functions: count blocks of each type
+	UserdataBlockList  = 0x02 // block functions: list blocks of one type
+	UserdataBlockInfo  = 0x03 // block functions: get block info
 )
 
-// EncodeSZLRequest creates a SZL read request
-func EncodeSZLRequest(pduRef, szlID, szlIndex uint16) []byte {
-	// Parameter block
-	param := []byte{
-		0x00, 0x01, 0x12, // Parameter header
-		0x04, // Parameter length
-		UserdataSubParam,
-		UserdataSZL,
-		0x00, // Sequence number
-		0x00, // Data unit reference number
-	}
+// EncodeUserdataRequest encodes the first request of a user data exchange:
+// group is the function group (UserdataGroup*), subfunc its subfunction,
+// data the data section. A data section longer than a 16-bit length field
+// holds returns ErrOutOfRange.
+func EncodeUserdataRequest(pduRef uint16, group, subfunc byte, data []byte) ([]byte, error) {
+	param := []byte{0x00, 0x01, 0x12, 0x04, UserdataReq, UserdataTypeRequest | group&0x0f, subfunc, 0x00}
+	return encodeMessage(ROSCTRUserdata, pduRef, param, data)
+}
 
-	// Data block
+// userdataRequest encodes a request whose data section has a fixed size
+// well within the 16-bit length field, so encoding cannot fail.
+func userdataRequest(pduRef uint16, group, subfunc byte, data []byte) []byte {
+	msg, _ := EncodeUserdataRequest(pduRef, group, subfunc, data)
+	return msg
+}
+
+// EncodeUserdataFollowUp asks for the next packet of a response the CPU
+// marked "more data follows", with the sequence number of that response.
+func EncodeUserdataFollowUp(pduRef uint16, group, subfunc, seq byte) []byte {
+	param := []byte{0x00, 0x01, 0x12, 0x08, UserdataRes, UserdataTypeRequest | group&0x0f, subfunc, seq, 0x00, 0x00, 0x00, 0x00}
+	msg, _ := encodeMessage(ROSCTRUserdata, pduRef, param, []byte{RetCodeNotAvailable, 0x00, 0x00, 0x00}) // fixed sizes
+	return msg
+}
+
+// UserdataParam is the parameter section of a user data response.
+type UserdataParam struct {
+	Group       byte   // function group
+	Subfunction byte   //
+	Sequence    byte   // sequence number, echoed in a follow-up request
+	More        bool   // last data unit 0x01: more data follows
+	ErrorCode   uint16 // 0 when no error
+}
+
+// ParseUserdataParam decodes the parameter section of a user data response.
+func ParseUserdataParam(param []byte) (*UserdataParam, error) {
+	if len(param) < 12 || param[0] != 0x00 || param[1] != 0x01 || param[2] != 0x12 || param[3] != 0x08 {
+		return nil, &S7Error{Message: fmt.Sprintf("user data response parameter of %d bytes is not 00 01 12 08", len(param))}
+	}
+	return &UserdataParam{
+		Group:       param[5] & 0x0f,
+		Subfunction: param[6],
+		Sequence:    param[7],
+		More:        param[9] != 0x00,
+		ErrorCode:   binary.BigEndian.Uint16(param[10:12]),
+	}, nil
+}
+
+// ParseUserdataData returns the payload of a user data data section (after
+// return code, transport size and length). A return code other than 0xFF is
+// returned as an error.
+func ParseUserdataData(data []byte) ([]byte, error) {
+	if len(data) < 4 {
+		return nil, &S7Error{Message: "user data section too short"}
+	}
+	if data[0] != RetCodeSuccess {
+		return nil, ReturnCodeError(data[0])
+	}
+	n := int(binary.BigEndian.Uint16(data[2:4]))
+	if 4+n > len(data) {
+		return nil, &S7Error{Message: fmt.Sprintf("user data length %d past the %d bytes received", n, len(data)-4)}
+	}
+	return data[4 : 4+n], nil
+}
+
+// EncodeSZLRequest creates a SZL read request: user data, CPU functions,
+// subfunction read SZL, data ff 09 00 04 <id> <index>.
+func EncodeSZLRequest(pduRef, szlID, szlIndex uint16) []byte {
 	data := make([]byte, 8)
 	data[0] = RetCodeSuccess                 // Return code
-	data[1] = 0x09                           // Transport size: OCT
+	data[1] = 0x09                           // Transport size: OCTET STRING
 	binary.BigEndian.PutUint16(data[2:4], 4) // Length
 	binary.BigEndian.PutUint16(data[4:6], szlID)
 	binary.BigEndian.PutUint16(data[6:8], szlIndex)
-
-	// Both sections are 8 bytes.
-	result := append(s7Header(ROSCTRUserdata, pduRef, 8, 8), param...)
-	return append(result, data...)
+	return userdataRequest(pduRef, UserdataGroupCPU, UserdataSZL, data)
 }
 
 // SZLResponse holds a parsed SZL response
@@ -122,16 +190,17 @@ type SZLResponse struct {
 	Data       []byte
 }
 
-// ParseSZLResponse parses a SZL read response from the S7 data payload.
-// Strict: validates return code, data length, and minimum 8-byte header.
+// ParseSZLResponse parses the first packet of a SZL read response from the
+// S7 data payload. Strict: validates return code, data length, and minimum
+// 8-byte header. When the CPU marks the response "more data follows"
+// (ParseUserdataParam), the next packets carry only further records: append
+// their ParseUserdataData payloads to Data.
 func ParseSZLResponse(data []byte) (*SZLResponse, error) {
+	if len(data) > 0 && data[0] != RetCodeSuccess {
+		return nil, ReturnCodeError(data[0]) // a refusal carries only 4 bytes
+	}
 	if len(data) < 8 {
 		return nil, &S7Error{Message: "SZL response too short"}
-	}
-
-	retCode := data[0]
-	if retCode != RetCodeSuccess {
-		return nil, ReturnCodeError(retCode)
 	}
 
 	// SZL data length; payload is data[8:end] with end = 4+dataLen (header is 4 bytes before data[8])

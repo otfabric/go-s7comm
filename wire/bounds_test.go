@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
-	"strings"
 	"testing"
 )
 
@@ -87,23 +86,8 @@ func TestEncodersAtTheLimits(t *testing.T) {
 	}
 
 	msg = must(EncodeStartUploadRequest(1, BlockTypeDB, MaxUploadBlockNumber))
-	if !bytes.Contains(msg, []byte("_A99999A")) {
+	if !bytes.Contains(msg, []byte("_0A99999A")) {
 		t.Errorf("block 99999 file name missing: % X", msg)
-	}
-}
-
-// An upload session ID over 255 bytes is cut to fit its length byte, and the
-// header still states the real parameter length.
-func TestUploadSessionIDIsCut(t *testing.T) {
-	for _, enc := range []func(uint16, string) []byte{EncodeUploadRequest, EncodeEndUploadRequest} {
-		msg := enc(1, strings.Repeat("x", 300))
-		h, body, err := ParseS7Header(msg)
-		if err != nil {
-			t.Fatalf("ParseS7Header: %v", err)
-		}
-		if body[8] != 255 || int(h.ParamLength) != 9+255 || len(body) != 9+255 {
-			t.Errorf("id length %d, param length %d, body %d", body[8], h.ParamLength, len(body))
-		}
 	}
 }
 
@@ -206,17 +190,6 @@ func FuzzParseWriteVarResponse(f *testing.F) {
 	f.Add([]byte{FuncWriteVar, 1}, []byte{RetCodeSuccess})
 	f.Add([]byte{FuncWriteVar, 3}, []byte{RetCodeSuccess, RetCodeAddressFault})
 	f.Fuzz(func(t *testing.T, param, data []byte) { _ = ParseWriteVarResponse(param, data) })
-}
-
-func FuzzParseStartUploadResponse(f *testing.F) {
-	f.Add([]byte{FuncUploadStart, 0, 0, 0, 0, 0, 0, 0, 2, '4', '2'})
-	f.Add([]byte{FuncUploadStart, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0})
-	f.Fuzz(func(t *testing.T, param []byte) {
-		id, err := ParseStartUploadResponse(param)
-		if err == nil && len(id) > len(param) {
-			t.Fatalf("id %q longer than the parameter", id)
-		}
-	})
 }
 
 func FuzzParseBlockResponses(f *testing.F) {

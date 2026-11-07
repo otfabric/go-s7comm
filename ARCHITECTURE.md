@@ -27,6 +27,7 @@ The arrows follow the import graph (`go list -f '{{.Imports}}' ./...`).
 - **`wire`** encodes and parses S7 PDUs and TSAPs. It performs no I/O. It is strict on framing and declared lengths and leaves semantic interpretation to `client` and `model` ([wire/doc.go](wire/doc.go)).
 - **`model`** holds transport-agnostic value types. `model/codec` is its only module dependency.
 - **`server`** accepts COTP connections through go-cotp and answers jobs with the `wire` server codec from memory it holds. It does not import `client`.
+- **`internal/capture`** reads the recorded captures in `testdata/captures` for the tests of `wire`, `client` and `server`; no library package imports it.
 - **`interop`** carries the build tag `interop` and is excluded from normal builds. It uses `client`, `model` and `wire` through their public API.
 
 The root package holds documentation only. Applications import the subpackages.

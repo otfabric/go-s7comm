@@ -157,12 +157,8 @@ func startFakeSZLServer(t *testing.T, reply func(pduRef uint16, req []byte) []by
 
 func TestListBlocks_Success(t *testing.T) {
 	port, cleanup := startFakeSZLServer(t, func(pduRef uint16, _ []byte) []byte {
-		// dataLen = 4 (SZL ID+index) + entry bytes; payload must be >= dataLen for copy.
-		payload := make([]byte, 8)
-		binary.BigEndian.PutUint16(payload[0:2], 1)
-		payload[2] = wire.BlockTypeDB
-		payload[3] = 0x10
-		return buildSZLResponse(pduRef, wire.SZLBlockList, 8, payload)
+		// One entry as an S7-300 lists it: block number, flags, language.
+		return buildBlockResponse(pduRef, wire.UserdataBlockList, []byte{0x00, 0x01, 0x22, 0x05})
 	})
 	defer cleanup()
 
@@ -178,15 +174,14 @@ func TestListBlocks_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListBlocks: %v", err)
 	}
-	if len(blocks) != 1 || blocks[0].Number != 1 || blocks[0].Type != model.BlockDB {
+	if len(blocks) != 1 || blocks[0].Number != 1 || blocks[0].Type != model.BlockDB || blocks[0].Flags != 0x22 || blocks[0].Language != 5 {
 		t.Fatalf("blocks = %+v", blocks)
 	}
 }
 
 func TestListAllBlocks_AllSucceedEmpty(t *testing.T) {
 	port, cleanup := startFakeSZLServer(t, func(pduRef uint16, _ []byte) []byte {
-		// Empty list: SZL ID+index only (dataLen=4), no entries.
-		return buildSZLResponse(pduRef, wire.SZLBlockList, 4, make([]byte, 4))
+		return buildBlockResponse(pduRef, wire.UserdataBlockList, nil)
 	})
 	defer cleanup()
 
@@ -209,11 +204,7 @@ func TestListAllBlocks_AllSucceedEmpty(t *testing.T) {
 
 func TestGetBlockInfo_Success(t *testing.T) {
 	port, cleanup := startFakeSZLServer(t, func(pduRef uint16, _ []byte) []byte {
-		payload := make([]byte, 10)
-		binary.BigEndian.PutUint16(payload[0:2], 100)
-		binary.BigEndian.PutUint16(payload[2:4], 200)
-		binary.BigEndian.PutUint16(payload[4:6], 300)
-		return buildSZLResponse(pduRef, wire.SZLBlockInfo, 10, payload)
+		return buildBlockResponse(pduRef, wire.UserdataBlockInfo, blockInfoRecord(100, 200, 300))
 	})
 	defer cleanup()
 
@@ -229,17 +220,14 @@ func TestGetBlockInfo_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBlockInfo: %v", err)
 	}
-	if info.LoadMemory != 100 || info.LocalData != 200 || info.MC7Size != 300 {
+	if info.LoadMemory != 100 || info.LocalData != 200 || info.MC7Size != 300 || info.Author != "AUTHOR" || info.Version != "1.2" {
 		t.Fatalf("info = %+v", info)
 	}
 }
 
 func TestGetBlockInfo_PartialOnShortPayload(t *testing.T) {
 	port, cleanup := startFakeSZLServer(t, func(pduRef uint16, _ []byte) []byte {
-		// 2-byte Data after SZL header → ParseBlockInfoResponse needs 6 → partial + error.
-		payload := make([]byte, 6)
-		payload[0], payload[1] = 0, 1
-		return buildSZLResponse(pduRef, wire.SZLBlockInfo, 6, payload)
+		return buildBlockResponse(pduRef, wire.UserdataBlockInfo, make([]byte, 6))
 	})
 	defer cleanup()
 
@@ -263,9 +251,7 @@ func TestGetBlockInfo_PartialOnShortPayload(t *testing.T) {
 func TestListBlocks_BadSZLPayload(t *testing.T) {
 	port, cleanup := startFakeSZLServer(t, func(pduRef uint16, _ []byte) []byte {
 		// Data length 5 (not multiple of 4) → ParseBlockListResponse error.
-		payload := make([]byte, 9)
-		copy(payload, []byte{1, 2, 3, 4, 5})
-		return buildSZLResponse(pduRef, wire.SZLBlockList, 9, payload)
+		return buildBlockResponse(pduRef, wire.UserdataBlockList, []byte{1, 2, 3, 4, 5})
 	})
 	defer cleanup()
 
@@ -377,18 +363,18 @@ func TestAutoConnect_BruteCanceled(t *testing.T) {
 func TestGetCPUState_StopAndStartup(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		byte2 byte
+		bzuID byte // SZL 0x0424 record byte 3: previous mode, requested mode
 		want  model.CPUState
 	}{
+		{"run", 0x08, model.CPUStateRun},
 		{"stop", 0x04, model.CPUStateStop},
-		{"startup", 0x01, model.CPUStateStartup},
-		{"unknown", 0xFF, model.CPUStateUnknown},
+		{"startup", 0x05, model.CPUStateStartup},
+		{"hold", 0x0a, model.CPUStateHold},
+		{"unknown", 0x0f, model.CPUStateUnknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			port, cleanup := startFakeSZLServer(t, func(pduRef uint16, _ []byte) []byte {
-				payload := make([]byte, 8)
-				payload[2] = tc.byte2
-				return buildSZLResponse(pduRef, wire.SZLCPUState, 8, payload)
+				return buildSZLReply(pduRef, wire.SZLCPUState, szlList(20, []byte{0x51, 0x44, 0xff, tc.bzuID}))
 			})
 			defer cleanup()
 
@@ -416,16 +402,12 @@ func TestIdentify_ShortModulePayloadPartial(t *testing.T) {
 	port, cleanup := startFakeSZLServer(t, func(pduRef uint16, _ []byte) []byte {
 		n++
 		if n == 1 {
-			// Module ID: Data len 10 (<20) → short-payload error branch.
-			payload := make([]byte, 14)
-			copy(payload, []byte("short"))
-			return buildSZLResponse(pduRef, wire.SZLModuleID, 14, payload)
+			// Module ID records shorter than the 28 bytes of the layout.
+			return buildSZLReply(pduRef, wire.SZLModuleID, szlList(10, []byte{0x00, 0x01}))
 		}
-		// Component ID: long enough for ModuleName/PlantID.
-		payload := make([]byte, 38)
-		copy(payload[2:26], []byte("CPU 315-2 DP            "))
-		copy(payload[26:34], []byte("PLANT01 "))
-		return buildSZLResponse(pduRef, wire.SZLComponentID, 38, payload)
+		return buildSZLReply(pduRef, wire.SZLComponentID, szlList(34,
+			append([]byte{0x00, 0x02}, "CPU 315-2 DP"...),
+			append([]byte{0x00, 0x03}, "PLANT01"...)))
 	})
 	defer cleanup()
 
@@ -442,10 +424,10 @@ func TestIdentify_ShortModulePayloadPartial(t *testing.T) {
 		t.Fatalf("want partial info, err=%v", err)
 	}
 	if err == nil {
-		t.Fatal("expected short module payload error")
+		t.Fatal("expected short module record error")
 	}
-	if info.ModuleName == "" {
-		t.Fatalf("expected ModuleName from component SZL, got %+v", info)
+	if info.ModuleName != "CPU 315-2 DP" || info.PlantID != "PLANT01" {
+		t.Fatalf("expected ModuleName and PlantID from component SZL, got %+v", info)
 	}
 }
 
@@ -639,11 +621,9 @@ func TestRunFollowUp_ConfirmAnyFallsThroughToProtection(t *testing.T) {
 			switch i {
 			case 0, 1:
 				// Fail ModuleID / CPUState parse with bad return code.
-				bad := buildSZLResponse(pduRef, wire.SZLModuleID, 8, make([]byte, 8))
-				bad[14] = 0x0A // non-success ret code
-				_ = srv.WriteTSDU(ctx, bad)
+				_ = srv.WriteTSDU(ctx, buildSZLItemError(pduRef, wire.RetCodeNotAvailable))
 			default:
-				_ = srv.WriteTSDU(ctx, buildSZLResponse(pduRef, wire.SZLProtectionInfo, 8, make([]byte, 8)))
+				_ = srv.WriteTSDU(ctx, buildSZLReply(pduRef, wire.SZLProtectionInfo, szlList(40, []byte{0, 4, 0, 1, 0, 0, 0, 1})))
 			}
 		}
 	}()

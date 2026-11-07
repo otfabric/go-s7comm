@@ -46,12 +46,15 @@
 // In non-strict mode, “valid” means setup-only or valid-connect. In strict
 // mode, only valid-query is considered valid.
 //
-// # Best-effort and heuristic behavior
+// # Partial results
 //
-// Identify, GetBlockInfo, ListAllBlocks, and ReadDiagBuffer are best-effort and may return
-// partial data with a non-nil error. Use result.Status and errors to distinguish full
-// success from partial or best-effort results. Serialization (e.g. JSON) of result types
-// is the responsibility of the caller; this package does not define wire or format contracts.
+// Identify, GetBlockInfo, ListAllBlocks, and ReadDiagBuffer may return partial data with
+// a non-nil error (one of two SZL lists failed, an answer could not be decoded, a block
+// type could not be listed). Use result.Status and errors to distinguish full success from
+// partial results. SZL, block and upload requests are those Snap7 and TIA Portal send, and
+// answers are decoded by SZL record index, as recorded from real CPUs in testdata/captures.
+// Serialization (e.g. JSON) of result types is the responsibility of the caller; this
+// package does not define wire or format contracts.
 //
 // # Errors and sentinels
 //

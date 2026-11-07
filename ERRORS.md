@@ -156,7 +156,7 @@ A PLC can refuse access in two different places. Keep them apart in error handli
 
 The item codes are the Siemens ones: STEP 7 V20, [Use of FETCH/WRITE (S7-300, S7-400)](https://docs.tia.siemens.cloud/r/en-us/v20/editing-devices-and-networks/configure-networks/communication-via-connections/connection-types-s7-300-s7-400-s7-1500/fetch/write-mode-s7-300-s7-400/use-of-fetch/write-s7-300-s7-400), diagnostic-buffer codes 03H "Object access is not allowed", 05H "Invalid address", 0AH "The object does not exist, or the range limit was exceeded"; Wireshark's s7comm dissector and the PLC4X S7 model name them the same way. Snap7-based servers send `0x0A` for every refused write, including a write to a read-only area, because Snap7 has no code for refused access ([snap7-interop COMPATIBILITY.md](https://github.com/otfabric/snap7-interop/blob/main/docs/COMPATIBILITY.md#write-to-a-read-only-area-0x03-and-0x0a)); a client must therefore not read `0x0A` as "the DB does not exist" without more context.
 
-Which item code a physical Siemens CPU sends for a write to a write-protected DB is not verified yet ([#18](https://github.com/otfabric/go-s7comm/issues/18)).
+Recorded evidence ([testdata/captures](testdata/captures/README.md)): a CPU 315-2 PN/DP (firmware V3.2.7) answers one Write Var of M, I, Q, a timer and a counter with `FF FF FF 03 03`, refusing the writes to the existing timer and counter as object access not allowed, while it reads all five; it answers a read of a DB that does not exist with `0x0A`. `ParseWriteVarResponse` reports the first refused item of such an answer. No capture holds a write to a write-protected DB ([snap7-interop#19](https://github.com/otfabric/snap7-interop/issues/19)).
 
 ### Other wire types and sentinels
 

@@ -4,16 +4,18 @@ package model
 
 // DeviceInfo contains identification information about an S7 device
 type DeviceInfo struct {
-	OrderNumber  string
-	SerialNumber string
-	ModuleName   string
-	PlantID      string
-	Copyright    string
-	ModuleType   string
-	FWVersion    string
-	HWVersion    string
-	CPUType      string
-	CPUFamily    string
+	OrderNumber      string // SZL 0x0011 index 1
+	SerialNumber     string // SZL 0x001C index 5
+	ModuleName       string // SZL 0x001C index 2
+	PlantID          string // SZL 0x001C index 3
+	Copyright        string // SZL 0x001C index 4
+	ModuleType       string // SZL 0x001C index 7, module type name
+	FWVersion        string // SZL 0x0011 index 7, "Vx.y.z"
+	HWVersion        string
+	CPUType          string // ModuleType when it names a CPU
+	CPUFamily        string
+	SystemName       string // SZL 0x001C index 1, name of the automation system
+	MemoryCardSerial string // SZL 0x001C index 8
 }
 
 // ConnectionInfo contains a snapshot of the established connection and negotiated limits.
