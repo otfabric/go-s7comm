@@ -482,18 +482,40 @@ func EncodeWriteVarRequest(pduRef uint16, addr S7AnyAddress, value []byte) ([]by
 	return encodeMessage(ROSCTRJob, pduRef, param, data)
 }
 
-// ParseWriteVarResponse parses a write variable response
-func ParseWriteVarResponse(param, data []byte) error {
+// ParseWriteVarResponseCodes returns the item return codes of a Write Var
+// response, one per item the parameter section counts.
+func ParseWriteVarResponseCodes(param, data []byte) ([]byte, error) {
 	if len(param) < 2 {
-		return &S7Error{Message: "write response param too short"}
+		return nil, &S7Error{Message: "write response param too short"}
 	}
 	if param[0] != FuncWriteVar {
-		return &S7Error{Message: "not a write var response"}
+		return nil, &S7Error{Message: "not a write var response"}
 	}
-	if len(data) < 1 {
-		return &S7Error{Message: "write response data too short"}
+	n := int(param[1])
+	if n == 0 || len(data) < n {
+		return nil, &S7Error{Message: fmt.Sprintf("write response: %d item codes for %d items", len(data), n)}
 	}
-	return ReturnCodeError(data[0])
+	return data[:n], nil
+}
+
+// ParseWriteVarResponse parses a write variable response. It returns nil
+// only when every item succeeded; otherwise the error of the first item
+// that did not (ReturnCodeError), wrapped with its index when the response
+// has more than one item.
+func ParseWriteVarResponse(param, data []byte) error {
+	codes, err := ParseWriteVarResponseCodes(param, data)
+	if err != nil {
+		return err
+	}
+	for i, c := range codes {
+		if err := ReturnCodeError(c); err != nil {
+			if len(codes) == 1 {
+				return err
+			}
+			return fmt.Errorf("write item %d of %d: %w", i, len(codes), err)
+		}
+	}
+	return nil
 }
 
 // Typed decoding for successful ReadVar items. No decode for non-success; unknown transport size returns error without panic.

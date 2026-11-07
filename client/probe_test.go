@@ -649,9 +649,7 @@ func TestProbeRackSlotsStrictWithSZL(t *testing.T) {
 			return
 		}
 		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
-		payload := make([]byte, 22)
-		copy(payload, []byte("6ES7 315-2AG10-0AB0          "))
-		_ = srv.WriteTSDU(ctx, buildSZLResponse(pduRef, wire.SZLModuleID, 22, payload))
+		_ = srv.WriteTSDU(ctx, buildSZLReply(pduRef, wire.SZLModuleID, szlList(28, append([]byte{0x00, 0x01}, "6ES7 315-2AG10-0AB0"...))))
 	})
 	defer cleanup()
 
@@ -698,9 +696,7 @@ func TestProbeRackSlotsStrictWithCPUState(t *testing.T) {
 			return
 		}
 		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
-		payload := make([]byte, 8)
-		payload[2] = 0x08 // Run
-		_ = srv.WriteTSDU(ctx, buildSZLResponse(pduRef, wire.SZLCPUState, 8, payload))
+		_ = srv.WriteTSDU(ctx, buildSZLReply(pduRef, wire.SZLCPUState, szlList(20, []byte{0x51, 0x44, 0xff, 0x08})))
 	})
 	defer cleanup()
 

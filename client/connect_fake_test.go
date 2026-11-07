@@ -71,16 +71,18 @@ func TestConnectWithFakeServer(t *testing.T) {
 			_ = srv.WriteTSDU(ctx, writeResp)
 		}
 		// 6 & 7. SZL requests (Identify sends two: ModuleID and ComponentID)
-		for range 2 {
+		for i := range 2 {
 			tsdu, err = srv.ReadTSDU(ctx)
 			if err != nil {
 				return
 			}
 			if len(tsdu) >= 12 {
 				pduRef := binary.BigEndian.Uint16(tsdu[4:6])
-				payload := make([]byte, 38)
-				copy(payload, []byte("6ES7 315-2AG10-0AB0          "))
-				_ = srv.WriteTSDU(ctx, buildSZLResponse(pduRef, wire.SZLModuleID, 38, payload))
+				if i == 0 {
+					_ = srv.WriteTSDU(ctx, buildSZLReply(pduRef, wire.SZLModuleID, szlList(28, append([]byte{0x00, 0x01}, "6ES7 315-2AG10-0AB0"...))))
+				} else {
+					_ = srv.WriteTSDU(ctx, buildSZLReply(pduRef, wire.SZLComponentID, szlList(34, append([]byte{0x00, 0x02}, "PLC_1"...))))
+				}
 			}
 		}
 		// 8 & 8b. ProbeReadableRanges single offset with Repeat=2 (two read responses)
@@ -112,9 +114,7 @@ func TestConnectWithFakeServer(t *testing.T) {
 		}
 		if len(tsdu) >= 12 {
 			pduRef := binary.BigEndian.Uint16(tsdu[4:6])
-			payload := make([]byte, 8)
-			payload[2] = 0x08 // Run at resp.Data[2]
-			_ = srv.WriteTSDU(ctx, buildSZLResponse(pduRef, wire.SZLCPUState, 8, payload))
+			_ = srv.WriteTSDU(ctx, buildSZLReply(pduRef, wire.SZLCPUState, szlList(20, []byte{0x51, 0x44, 0xff, 0x08})))
 		}
 		// 12. GetProtectionLevel SZL (0x0232)
 		tsdu, err = srv.ReadTSDU(ctx)
@@ -123,9 +123,8 @@ func TestConnectWithFakeServer(t *testing.T) {
 		}
 		if len(tsdu) >= 12 {
 			pduRef := binary.BigEndian.Uint16(tsdu[4:6])
-			payload := make([]byte, 8)
-			payload[2] = 0 // No protection
-			_ = srv.WriteTSDU(ctx, buildSZLResponse(pduRef, wire.SZLProtectionInfo, 8, payload))
+			// sch_rel 1: no protection.
+			_ = srv.WriteTSDU(ctx, buildSZLReply(pduRef, wire.SZLProtectionInfo, szlList(40, []byte{0, 4, 0, 1, 0, 0, 0, 1, 0, 2})))
 		}
 		// 13. ReadDiagBuffer SZL (0x00A0)
 		tsdu, err = srv.ReadTSDU(ctx)
@@ -134,12 +133,7 @@ func TestConnectWithFakeServer(t *testing.T) {
 		}
 		if len(tsdu) >= 12 {
 			pduRef := binary.BigEndian.Uint16(tsdu[4:6])
-			payload := make([]byte, 24)
-			payload[0] = 0
-			payload[1] = 1
-			payload[2] = 0x10
-			payload[3] = 0x20
-			_ = srv.WriteTSDU(ctx, buildSZLResponse(pduRef, wire.SZLDiagBuffer, 24, payload))
+			_ = srv.WriteTSDU(ctx, buildSZLReply(pduRef, wire.SZLDiagBuffer, szlList(20, []byte{0x43, 0x02, 0xff, 0x01})))
 		}
 	}()
 
@@ -195,8 +189,8 @@ func TestConnectWithFakeServer(t *testing.T) {
 	if devInfo == nil {
 		t.Fatal("Identify returned nil")
 	}
-	if devInfo.OrderNumber == "" {
-		t.Log("Identify OrderNumber empty (server sent minimal SZL)")
+	if devInfo.OrderNumber != "6ES7 315-2AG10-0AB0" {
+		t.Errorf("Identify OrderNumber = %q", devInfo.OrderNumber)
 	}
 
 	// ProbeReadableRanges with one offset and Repeat=2 exercises probeOneOffset and byteSlicesEqual

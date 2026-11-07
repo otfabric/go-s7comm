@@ -1,5 +1,51 @@
 # go-s7comm Releases
 
+## v0.11.0
+
+**Date:** 2026-11-07
+**Previous release:** v0.10.2
+
+### Summary
+
+go-s7comm is now tested against 25 recorded captures of real S7-300 and S7-400 CPUs (14,393 S7 PDUs; [testdata/captures](testdata/captures/README.md)). They showed that the client's user data, block and upload requests did not match the protocol real clients and CPUs use, so `Identify`, `GetCPUState`, `GetProtectionLevel`, `ReadDiagBuffer`, `ListBlocks`, `GetBlockInfo` and `UploadBlock` could not work against a real CPU. All are fixed: the requests are now byte for byte those of Snap7 and TIA Portal V13, and the client decodes the recorded answers of a CPU 315-2 PN/DP and an IM151-8 PN/DP CPU to the values Snap7 logged and Wireshark decodes. The server answers every recorded Setup Communication, Read Var and Write Var job byte for byte as the CPUs did, apart from three pinned differences.
+
+### Fixed
+
+- SZL reads (`Identify`, `GetCPUState`, `GetProtectionLevel`, `ReadDiagBuffer*`, and the rack/slot probe's follow-up): the user data parameter lacked the method byte (`00 01 12 04 44 01 00 00` instead of `00 01 12 04 11 44 01 00`), so a CPU read it as a request of another function group. An answer in several packets ("more data follows") is now collected with follow-up requests.
+- `Identify` read fixed offsets that ignored the SZL list header; it now reads SZL 0x0011 and 0x001C records by index: order number, firmware (`Vx.y.z` from index 7), and the module, system, plant, copyright, serial, module type and memory card texts.
+- `GetCPUState` read the wrong byte; it now reads the mode of SZL 0x0424's record (1–4 STOP, 5–7 STARTUP, 8–9 RUN, 10 HOLD).
+- `GetProtectionLevel` asked for SZL 0x0232 index 0 and read the wrong byte; it now asks for index 4 and reads `sch_rel` (Siemens level 1 none, 2 write protected, 3 read/write protected).
+- `ReadDiagBuffer` stepped through the list header as if it were records; it now reads the 20-byte records (event ID, class, priority, info, time stamp).
+- `ListBlocks` asked for SZL 0x0111; it now uses the block functions (list blocks of a type), collecting every packet. Entries are block number, flags and language.
+- `GetBlockInfo` asked for SZL 0x0113; it now uses the block functions (block info) and decodes the block header: language, flags, load memory, local data, MC7 and SSB length, author, family, name, version and checksum. Block numbers 0..99999.
+- `UploadBlock`: the file name was `_<type><number>A\0` instead of `_0<type><number>A`; the upload ID is the CPU's 4-byte number, not a text; the segment length is in bytes in the first two data bytes.
+- `wire.ParseWriteVarResponse` checked only the first item, so an answer refusing a later item (a real CPU's `FF FF FF 03 03`) passed as success. It now fails on the first refused item.
+- `wire.ParseSZLResponse` reported a refusal of 4 bytes as "too short" instead of its return code.
+
+### Added
+
+- `Client.BlockCounts`: the number of blocks of each type.
+- `model.DeviceInfo.SystemName` and `MemoryCardSerial`.
+- `wire`: `EncodeUserdataRequest`, `EncodeUserdataFollowUp`, `ParseUserdataParam` (`UserdataParam`), `ParseUserdataData`, the `UserdataGroup*`, `UserdataBlock*` and `UserdataType*` constants, `EncodeBlockCountRequest`, `ParseBlockCountResponse` (`BlockCount`), `EncodeBlockInfoRequest`, `ParseWriteVarResponseCodes`, `StartUpload`.
+- `testdata/captures`: 25 captures from [gymgit/s7-pcaps](https://github.com/gymgit/s7-pcaps) and the Wireshark wiki, with sources, devices, clients and SHA256 checksums; `internal/capture` reads them. Tests: every PDU decodes; encoders equal recorded requests; the client against recorded answers; the server against the recorded CPUs' answers.
+
+### Changed (breaking, `wire`)
+
+- `ParseStartUploadResponse` returns `StartUpload` (upload ID and announced length) instead of a string; `EncodeUploadRequest` and `EncodeEndUploadRequest` take the `uint32` upload ID.
+- `ParseBlockListResponse` and `ParseBlockInfoResponse` take the block functions payload (`ParseUserdataData`); `BlockInfoData` has the fields of the block header.
+- `EncodeBlockListRequest` encodes the block functions request instead of an SZL read.
+- `ReadDiagBufferRaw` returns the SZL list data including its header (record length and count), all packets of it.
+
+### Documentation
+
+- testdata/captures/README.md; TESTING.md, INTEROPERABILITY.md (recorded traffic), LIMITATIONS.md, ERRORS.md (a real CPU's `0x03`), API.md, docs/FEATURE-STATUS.md, ARCHITECTURE.md, README.md.
+
+### Known differences of the server (follow-up)
+
+The server grants one parallel job (AmQ) where the recorded CPUs grant two, holds no timer or counter areas, and refuses the S7-400's DBREAD (syntax `0xB0`) items. `server/capture_test.go` pins them.
+
+---
+
 ## v0.10.2
 
 **Date:** 2026-11-07

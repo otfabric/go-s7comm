@@ -30,39 +30,53 @@ func isUploadProtocolError(err error) bool {
 	return errors.As(err, &s7Err)
 }
 
-// ListBlocks returns a list of blocks of the specified type
+// ListBlocks returns the blocks of one type (block functions, list
+// blocks of type), all packets of the list.
 func (c *Client) ListBlocks(ctx context.Context, bt model.BlockType) ([]model.BlockInfo, error) {
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()
 
 	ref := c.nextPDURef()
-	req := wire.EncodeBlockListRequest(ref, byte(bt))
-	_, data, err := c.sendReceive(ctx, req, ref)
+	_, payload, err := c.userdata(ctx, wire.EncodeBlockListRequest(ref, byte(bt)), ref, wire.UserdataGroupBlock, wire.UserdataBlockList)
 	if err != nil {
 		return nil, err
 	}
-
-	resp, err := wire.ParseSZLResponse(data)
+	entries, err := wire.ParseBlockListResponse(payload)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, ErrProtocolFailure)
 	}
-
-	entries, err := wire.ParseBlockListResponse(resp.Data)
-	if err != nil {
-		return nil, err
-	}
-
-	var blocks []model.BlockInfo
+	blocks := make([]model.BlockInfo, 0, len(entries))
 	for _, e := range entries {
 		blocks = append(blocks, model.BlockInfo{
-			Type:     model.BlockType(e.BlockType),
+			Type:     bt,
 			Number:   int(e.BlockNumber),
 			Language: model.BlockLang(e.Language),
 			Flags:    e.Flags,
 		})
 	}
-
 	return blocks, nil
+}
+
+// BlockCounts returns how many blocks of each type the CPU holds (block
+// functions, list blocks), keyed by block type.
+func (c *Client) BlockCounts(ctx context.Context) (map[model.BlockType]int, error) {
+	c.reqMu.Lock()
+	defer c.reqMu.Unlock()
+
+	ref := c.nextPDURef()
+	_, payload, err := c.userdata(ctx, wire.EncodeBlockCountRequest(ref), ref, wire.UserdataGroupBlock, wire.UserdataBlockCount)
+	if err != nil {
+		return nil, err
+	}
+	counts, err := wire.ParseBlockCountResponse(payload)
+	if err != nil {
+		return nil, errors.Join(err, ErrProtocolFailure)
+	}
+	out := make(map[model.BlockType]int, len(counts))
+	for _, bc := range counts {
+		out[model.BlockType(bc.BlockType)] = bc.Count
+	}
+	return out, nil
 }
 
 // ListAllBlocks is best-effort and may return partial results with aggregated errors.
@@ -97,43 +111,47 @@ func (c *Client) ListAllBlocks(ctx context.Context) ([]model.BlockInfo, error) {
 	return all, nil
 }
 
-// GetBlockInfo is best-effort and may return partial info with a non-nil error.
-// On transport/protocol failure before a valid response: returns nil, err.
-// On parse failure after transport success: returns partial BlockInfo with Type and Number set, plus err.
-// Only LoadMemory, LocalData, and MC7Size are parsed; layout is device-dependent and may be partial.
-// Block numbers must be in 0..65535; invalid num returns ValidationError.
+// GetBlockInfo returns the header of one block (block functions, get
+// block info): language, flags, lengths, author, family, name, version and
+// checksum. Block numbers must be in 0..99999 (the five-digit block
+// address); an invalid number or block type returns ValidationError without
+// sending a request. When the answer cannot be decoded it returns a
+// BlockInfo with only Type and Number set, and the error.
 func (c *Client) GetBlockInfo(ctx context.Context, bt model.BlockType, num int) (*model.BlockInfo, error) {
-	if num < 0 || num > 0xFFFF {
-		return nil, &ValidationError{Message: fmt.Sprintf("block number %d out of range (0..65535)", num)}
+	if num < 0 || num > wire.MaxUploadBlockNumber {
+		return nil, &ValidationError{Message: fmt.Sprintf("block number %d out of range (0..%d)", num, wire.MaxUploadBlockNumber)}
 	}
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()
 
-	szlIndex := uint16(bt)<<8 | uint16(num)
 	ref := c.nextPDURef()
-	req := wire.EncodeSZLRequest(ref, wire.SZLBlockInfo, szlIndex)
-	_, data, err := c.sendReceive(ctx, req, ref)
+	req, err := wire.EncodeBlockInfoRequest(ref, byte(bt), num)
+	if err != nil {
+		return nil, &ValidationError{Message: err.Error()}
+	}
+	_, payload, err := c.userdata(ctx, req, ref, wire.UserdataGroupBlock, wire.UserdataBlockInfo)
 	if err != nil {
 		return nil, err
 	}
-
-	resp, err := wire.ParseSZLResponse(data)
+	bi, err := wire.ParseBlockInfoResponse(payload)
 	if err != nil {
-		return nil, err
+		return &model.BlockInfo{Type: bt, Number: num}, errors.Join(err, ErrProtocolFailure)
 	}
-
-	info := &model.BlockInfo{
-		Type:   bt,
-		Number: num,
-	}
-	blockInfo, parseErr := wire.ParseBlockInfoResponse(resp.Data)
-	if parseErr != nil {
-		return info, parseErr
-	}
-	info.LoadMemory = blockInfo.LoadMemory
-	info.LocalData = blockInfo.LocalData
-	info.MC7Size = blockInfo.MC7Size
-	return info, nil
+	return &model.BlockInfo{
+		Type:       bt,
+		Number:     bi.Number,
+		Language:   model.BlockLang(bi.Language),
+		Flags:      bi.Flags,
+		LoadMemory: bi.LoadMemory,
+		LocalData:  bi.LocalData,
+		MC7Size:    bi.MC7Size,
+		SBBLength:  bi.SSBLength,
+		Author:     bi.Author,
+		Family:     bi.Family,
+		Name:       bi.Name,
+		Version:    bi.Version,
+		CheckSum:   bi.Checksum,
+	}, nil
 }
 
 // UploadBlock uploads a block from the PLC. Block numbers must be in 0..65535.
@@ -157,7 +175,7 @@ func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (
 		return nil, err
 	}
 
-	sessionID, err := wire.ParseStartUploadResponse(param)
+	start, err := wire.ParseStartUploadResponse(param)
 	if err != nil {
 		return nil, fmt.Errorf("parse start upload: %w", errors.Join(err, ErrProtocolFailure))
 	}
@@ -165,7 +183,7 @@ func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 		endRef := c.nextPDURef()
-		_, _, err := c.sendReceive(cleanupCtx, wire.EncodeEndUploadRequest(endRef, sessionID), endRef)
+		_, _, err := c.sendReceive(cleanupCtx, wire.EncodeEndUploadRequest(endRef, start.UploadID), endRef)
 		if c.opts.logger != nil {
 			if err != nil {
 				c.opts.logger.Debug("upload cleanup: end-upload failed (best-effort): %v", err)
@@ -186,7 +204,7 @@ func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (
 				return nil, err
 			}
 			chunkRef := c.nextPDURef()
-			req = wire.EncodeUploadRequest(chunkRef, sessionID)
+			req = wire.EncodeUploadRequest(chunkRef, start.UploadID)
 			param, data, e := c.sendReceive(ctx, req, chunkRef)
 			if e != nil {
 				if isUploadProtocolError(e) {

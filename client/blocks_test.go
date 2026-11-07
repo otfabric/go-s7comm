@@ -85,7 +85,7 @@ func startFakeUploadServer(t *testing.T, chunks [][]byte) (port int, cleanup fun
 			return
 		}
 		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
-		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, "S1")); err != nil {
+		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, 7)); err != nil {
 			return
 		}
 		// Upload chunks
@@ -284,7 +284,7 @@ func startFakeUploadServerBadChunkResponse(t *testing.T) (port int, cleanup func
 			return
 		}
 		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
-		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, "S1")); err != nil {
+		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, 7)); err != nil {
 			return
 		}
 		// First chunk request: respond with wrong function code so ParseUploadResponse fails
@@ -352,7 +352,7 @@ func startFakeUploadServerCloseAfterLastChunk(t *testing.T, chunks [][]byte) (po
 			return
 		}
 		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
-		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, "S1")); err != nil {
+		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, 7)); err != nil {
 			_ = srv.Close()
 			_ = conn.Close()
 			return
@@ -426,7 +426,7 @@ func startFakeUploadServerHangOnFirstChunk(t *testing.T) (port int, cleanup func
 			return
 		}
 		pduRef := binary.BigEndian.Uint16(tsdu[4:6])
-		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, "S1")); err != nil {
+		if err := srv.WriteTSDU(ctx, buildStartUploadResponse(pduRef, 7)); err != nil {
 			return
 		}
 		// Receive first chunk request but never respond (client will timeout / context deadline)

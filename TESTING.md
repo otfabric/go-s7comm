@@ -12,6 +12,7 @@
 | Benchmarks | `make bench` | none | not run |
 | Cross-compilation | `make cross` | none | not run |
 | Interoperability | `make interop` | Docker, ports 1102 and 2102 free | `interop.yml`, every push and pull request |
+| Recorded traffic of real CPUs | part of `make test` | none; the captures are in `testdata/captures` | `ci.yml` (go-ci) |
 
 `make check` runs formatting, both linters, govulncheck, vet (including a compile of `interop/`), `test` and `coverage-pkg-check`. It does not start Docker.
 
@@ -24,6 +25,14 @@ CI runs on Linux only. See [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md#platf
 ## Server tests
 
 `server/` tests the server three ways. Through this module's client on loopback: every area, bits, refusals, a read larger than the PDU, PDU negotiation, eight concurrent clients, reconnect with memory kept, the connection limit and the idle timeout. With hand-built PDUs: the exact item codes and transport sizes of the table in [API.md](API.md#server), 25 items, answers past the PDU (`0x8500`), jobs and user data not implemented (`0x8104`) and malformed PDUs. On raw sockets: garbage before the handshake, a malformed PDU, an unsupported job, and `Close` with connections open. `FuzzHandle` feeds arbitrary PDUs to a session and checks that every PDU with a readable header gets an answer with its PDU reference.
+
+## Recorded traffic of real CPUs
+
+[testdata/captures](testdata/captures/README.md) holds 25 captures (14,393 S7 PDUs) between real S7-300/S7-400 CPUs and Snap7, STEP 7 5.5, TIA Portal V13, WinCC Advanced and libnodave, with their sources, devices and checksums. `internal/capture` reads them (pcap and pcapng, TCP reassembly, TPKT and COTP); its counts per file equal Wireshark 4.6.9's.
+
+- `wire`: every PDU decodes; every Read Var, Write Var and Setup Communication decodes both ways, every successful item has the requested length, and every user data request has the parameter layout the encoders produce. `TestCapturesEncodersMatchRecordedRequests` checks that the encoders produce, byte for byte, requests the real clients sent.
+- `client`: `TestCaptureReplay*` replays a capture as a server. A request is answered only if a real client sent the same bytes, so a request built differently fails the test. The results (Identify, CPU state, protection, diagnostic buffer, block counts, lists and info, an SDB upload) are compared with Snap7's log of the session and Wireshark's decode.
+- `server`: `TestCaptureReplayMatchesRealCPUs` sends every recorded Setup Communication, Read Var and Write Var job to a server holding the memory the CPU reported, and compares the answers byte for byte. The three differences that remain are pinned in the test.
 
 ## Goroutine leaks
 
@@ -52,10 +61,10 @@ With managed servers and no Docker, the suite skips (`interop/harness.go`). Ther
 
 ## Fuzzing
 
-Fuzz targets live in `wire/`, `model/codec/` and `server/`, next to the decoders and encoders. Encoder targets check that every input is either refused with `ErrOutOfRange` or encoded with exactly its fields and consistent lengths. `make fuzz` discovers them; do not list them by name. Every new decoder of untrusted input gets a target.
+Fuzz targets live in `wire/`, `model/codec/`, `server/` and `internal/capture/`, next to the decoders and encoders. Encoder targets check that every input is either refused with `ErrOutOfRange` or encoded with exactly its fields and consistent lengths. `make fuzz` discovers them; do not list them by name. Every new decoder of untrusted input gets a target.
 
 Regression procedure: when a fuzz run fails, Go writes the input to `testdata/fuzz/<FuzzName>/` in the package. Commit that file with the fix, so `go test` replays it as a seed from then on.
 
 ## Not tested here
 
-- No test against a physical PLC ([LIMITATIONS.md](LIMITATIONS.md#verification)).
+- No test against a live PLC: the captures are recorded traffic, and only the requests in them are covered ([LIMITATIONS.md](LIMITATIONS.md#verification)).

@@ -224,17 +224,23 @@ func (p *plc) write(ref uint16, param, data []byte) []byte {
 	return ack(ref, param[:2], []byte{code})
 }
 
-// szl answers an SZL read with the CPU state list: RUN.
+// szl answers an SZL read with the mode list (0x0424) as an S7-300 sends
+// it: record length 20, one record whose bzu-id byte says RUN (0x08). A
+// request without an SZL ID is refused with return code 0x0A.
 func (p *plc) szl(ref uint16, data []byte) []byte {
-	id := binary.BigEndian.Uint16(data[4:6])
-	payload := []byte{0x00, 0x00, 0x08, 0x00}
-	out := make([]byte, 8, 8+len(payload))
-	out[0], out[1] = wire.RetCodeSuccess, 0x09
-	binary.BigEndian.PutUint16(out[2:4], uint16(4+len(payload)))
-	binary.BigEndian.PutUint16(out[4:6], id)
-	out = append(out, payload...)
-
 	param := []byte{0x00, 0x01, 0x12, 0x08, 0x12, 0x84, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00}
+	out := []byte{wire.RetCodeNotAvailable, 0x00, 0x00, 0x00}
+	if len(data) >= 8 {
+		id := binary.BigEndian.Uint16(data[4:6])
+		record := make([]byte, 20)
+		copy(record, []byte{0x51, 0x44, 0xff, 0x08})
+		payload := append([]byte{0x00, 0x14, 0x00, 0x01}, record...)
+		out = make([]byte, 8, 8+len(payload))
+		out[0], out[1] = wire.RetCodeSuccess, 0x09
+		binary.BigEndian.PutUint16(out[2:4], uint16(4+len(payload)))
+		binary.BigEndian.PutUint16(out[4:6], id)
+		out = append(out, payload...)
+	}
 	hdr := must(wire.EncodeS7Header(wire.ROSCTRUserdata, ref, len(param), len(out)))
 	return append(append(hdr, param...), out...)
 }

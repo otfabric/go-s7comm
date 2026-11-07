@@ -44,7 +44,7 @@ The library provides:
 | Validation failure (bad input) | `*ValidationError`; use `errors.As(err, &ValidationError{})` to detect |
 | Byte read outcome (success / short / empty / rejected / timeout) | `ReadResult.Status` and `result.Err()` |
 | Bit R/W, writes, Connect, Upload, GetCPUState, … | Strict `error` return |
-| Metadata / best-effort (Identify, GetBlockInfo, …) | May return `(value, error)` both non-nil |
+| Metadata (Identify, GetBlockInfo, ListAllBlocks, ReadDiagBuffer) | May return partial `(value, error)`, both non-nil |
 
 Full guide (statuses, sentinels, wire `S7Error`, CLI exit-code contract): **[ERRORS.md](ERRORS.md)**. API signatures: **[API.md](API.md)**.
 
@@ -79,7 +79,8 @@ go-s7comm/
 ├── wire/              S7 PDU encode/decode and TSAP helpers (no TPKT/COTP)
 ├── server/            In-memory S7 server for tests (setup, Read Var, Write Var)
 ├── interop/           Build-tagged (`-tags=interop`) Snap7 black-box tests
-├── testdata/          Frame fixtures
+├── internal/capture/  Reader for the recorded captures (tests only)
+├── testdata/          Frame fixtures; captures/ recorded traffic of real CPUs
 ├── API.md             Public API reference
 ├── ERRORS.md          Error / ReadResult semantics
 ├── OBSERVABILITY.md   Logging (silent by default)

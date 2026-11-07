@@ -20,6 +20,7 @@ This repository follows **otfabric/engineering policy 1.2**, profile **protocol-
 | Test tiers | TESTING.md |
 | Peers, results | INTEROPERABILITY.md |
 | Feature verification | docs/FEATURE-STATUS.md |
+| Recorded traffic of real CPUs (sources, devices) | testdata/captures/README.md |
 | Release history | RELEASE.md |
 
 ## Hard rules

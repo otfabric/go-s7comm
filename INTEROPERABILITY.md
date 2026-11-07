@@ -42,9 +42,24 @@ Recorded: `Interop` workflow run for commit `436a28f` on `main`, and a local `ma
 - A rejected write to read-only memory is reported by both adapters as item code `0x0A`, normalised to `address-out-of-range`. Stock Snap7 has no code for refused access (`0x03`), so this suite does not exercise it against the peers; the Self-interop workflow does, against go-s7comm's own server.
 - The python adapter changes stock python-snap7 behaviour for out-of-range access, read-only access and bit writes so that it matches native Snap7 (snap7-interop `docs/compatibility.md`). Agreement between the peers on these points is therefore by construction, not two independent observations.
 
+## Recorded traffic of real CPUs
+
+[testdata/captures](testdata/captures/README.md): 25 captures between a CPU 315-2 PN/DP (6ES7 315-2EH14-0AB0, V3.2.7), an IM151-8 PN/DP CPU (6ES7 151-8AB01-0AB0, V3.2.6), an S7-400 and another S7-300, and five clients (Snap7, STEP 7 5.5, TIA Portal V13, WinCC Advanced, libnodave). These are real devices, recorded by others, and replayed; no live PLC is involved ([TESTING.md](TESTING.md#recorded-traffic-of-real-cpus)).
+
+| What | Result |
+|---|---|
+| Every S7 PDU (14,393) | decodes; counts per file equal Wireshark 4.6.9 |
+| Read Var answers of the CPUs (9,068 items) | every successful S7ANY item has the requested length (BIT, BYTE, INT in bits; DINT, REAL, OCTET STRING in bytes) |
+| Requests the encoders build | byte for byte the requests of Snap7, TIA Portal and libnodave: setup, Read Var, SZL, SZL follow-up, block count, list and info, start upload, upload, end upload |
+| Client against the CPU 315-2 PN/DP's recorded answers | `Identify`, `GetCPUState`, `BlockCounts`, `UploadBlock` (SDB 0) give the values Snap7 logged in the same session; `ListBlocks` (SFC in two packets), `GetBlockInfo`, `GetProtectionLevel`, `ReadDiagBuffer` give the values Wireshark decodes |
+| Client against the IM151-8 PN/DP CPU's recorded answers | `Identify`, `GetCPUState`, `ReadDiagBuffer`, `BlockCounts`, `ListBlocks` |
+| Server, every recorded Setup Communication, Read Var and Write Var job | the CPU's answer byte for byte: 22 setups, 3,241 reads, 2,080 writes. Differences: AmQ (4 setups: the CPUs grant 2, the server 1), timer and counter areas (87 jobs), DBREAD items of the S7-400 (84 jobs) |
+
+A CPU 315-2 PN/DP refuses a write to its timers and counters with item code `0x03` (object access is not allowed) while it reads them; it answers `0x0A` for a DB that does not exist ([ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors)).
+
 ## Not covered
 
-No independent peer has exercised these; they are tested only against the fake server, if at all: SZL, `Identify`, CPU state, protection level, diagnostic buffer, block list, info and upload, timers and counters, `Discover`, `ProbeRackSlots`, `CompareRead`, `ProbeReadableRanges`, multi-PDU read chunking. snap7-interop lists them as deferred or client-side (`docs/go-s7comm-coverage.md`).
+No independent peer and no recorded traffic covers these; they are tested only against the fake server, if at all: timers and counters through the client, `Discover`, `ProbeRackSlots`, `CompareRead`, `ProbeReadableRanges`, multi-PDU read chunking. snap7-interop lists them as deferred or client-side (`docs/go-s7comm-coverage.md`).
 
 ## Our own server (not a peer)
 
