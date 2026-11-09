@@ -1,5 +1,11 @@
 # go-s7comm Releases
 
+## Unreleased
+
+### Added
+
+- `client`: `WithDialer` and the `Dialer` type set the function that opens the TCP connection of `Connect`, so a caller can apply an address allowlist or dial through a proxy. The default is unchanged.
+
 ## v0.12.0
 
 **Date:** 2026-11-07

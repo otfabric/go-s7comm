@@ -21,14 +21,24 @@ func tsapSelector(tsap uint16) []byte {
 	return binary.BigEndian.AppendUint16(nil, tsap)
 }
 
-func dialTCP(ctx context.Context, address string, timeout time.Duration) (net.Conn, error) {
+func dialTCP(ctx context.Context, address string, timeout time.Duration, dial Dialer) (net.Conn, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	dialer := net.Dialer{Timeout: timeout}
-	raw, err := dialer.DialContext(ctx, "tcp", address)
+	if dial == nil {
+		d := net.Dialer{Timeout: timeout}
+		dial = d.DialContext
+	} else if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	raw, err := dial(ctx, "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("TCP connect: %w", err)
+	}
+	if raw == nil {
+		return nil, errors.New("TCP connect: dialer returned no connection")
 	}
 	return raw, nil
 }
@@ -61,8 +71,8 @@ func connectCOTP(ctx context.Context, raw net.Conn, timeout time.Duration, local
 }
 
 // dialCOTP dials TCP and completes the TP0 handshake for the given TSAPs.
-func dialCOTP(ctx context.Context, address string, timeout time.Duration, localTSAP, remoteTSAP uint16) (*cotp.Conn, error) {
-	raw, err := dialTCP(ctx, address, timeout)
+func dialCOTP(ctx context.Context, address string, timeout time.Duration, dial Dialer, localTSAP, remoteTSAP uint16) (*cotp.Conn, error) {
+	raw, err := dialTCP(ctx, address, timeout, dial)
 	if err != nil {
 		return nil, err
 	}

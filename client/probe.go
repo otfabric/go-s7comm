@@ -442,7 +442,7 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 	c.LocalTSAP = localTSAP
 	c.RemoteTSAP = remoteTSAP
 
-	raw, err := dialTCP(ctx, addr, req.Timeout)
+	raw, err := dialTCP(ctx, addr, req.Timeout, nil)
 	if err != nil {
 		c.Stage = ProbeStageTCP
 		if isProbeTimeout(err) {

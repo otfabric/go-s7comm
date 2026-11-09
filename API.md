@@ -448,6 +448,8 @@ type Logger interface {
     Error(msg string, args ...interface{})
 }
 
+type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
+
 func WithPort(port int) Option
 func WithRackSlot(rack, slot int) Option
 func WithTSAP(local, remote uint16) Option
@@ -455,6 +457,7 @@ func WithAutoRackSlot(brute bool) Option
 func WithTimeout(t time.Duration) Option
 func WithRateLimit(d time.Duration) Option
 func WithLogger(l Logger) Option
+func WithDialer(d Dialer) Option
 func WithMaxPDU(size int) Option
 func NewSlogLogger(h slog.Handler) Logger
 ```
@@ -467,12 +470,13 @@ Defaults:
 - max PDU request: 480
 - max AMQ calling/called: 1
 - logger: nil (silent)
+- dialer: nil (`net.Dialer` with the timeout); a custom `Dialer` gets network `"tcp"`, `host:port` and a context carrying the timeout, and returns a non-nil connection exactly when the error is nil. `Discover`, `ProbeRackSlots` and `CompareRead` always dial directly
 
 `Logger` is printf-style and optional; callbacks run synchronously on the request
 path. `NewSlogLogger` adapts `log/slog` without changing the interface.
 `NewSlogLogger(nil)` is a no-op. See [OBSERVABILITY.md](OBSERVABILITY.md).
 
-`WithTSAP` selects explicit local/remote TSAPs (skips rack/slot packing). `WithAutoRackSlot` tries common rack/slot pairs (or a brute range when `brute` is true).
+`WithTSAP` selects explicit local/remote TSAPs (skips rack/slot packing). `WithAutoRackSlot` tries common rack/slot pairs (or a brute range when `brute` is true); when every pair fails, its error does not wrap the `Dialer` error.
 
 ## model
 

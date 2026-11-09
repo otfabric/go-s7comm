@@ -3,7 +3,11 @@
 // Package client provides a high-level S7 client API.
 package client
 
-import "time"
+import (
+	"context"
+	"net"
+	"time"
+)
 
 // Option configures the S7 client. Options are immutable after construction.
 type Option func(*options)
@@ -23,6 +27,7 @@ type options struct {
 	maxPDU        int
 	maxAmqCalling int
 	maxAmqCalled  int
+	dialer        Dialer
 }
 
 // Logger is an optional printf-style sink for client diagnostics.
@@ -92,6 +97,22 @@ func WithRateLimit(d time.Duration) Option {
 // WithLogger sets an optional Logger. Nil disables logging (same as omitting the option).
 func WithLogger(l Logger) Option {
 	return func(o *options) { o.logger = l }
+}
+
+// Dialer opens the transport connection to addr ("host:port"). It receives
+// network "tcp". Like net.Dialer, it returns a non-nil connection exactly when
+// the error is nil.
+type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
+
+// WithDialer sets the function that opens the TCP connection of Connect, for
+// example to apply an address allowlist or to dial through a proxy. A nil
+// dialer (the default) uses net.Dialer with the timeout of WithTimeout; a
+// custom dialer is called with a context that already carries that timeout
+// and should honor it. The context is cancelled once the dial returns, so the
+// connection must not depend on it. Discover, ProbeRackSlots and CompareRead
+// always dial directly.
+func WithDialer(d Dialer) Option {
+	return func(o *options) { o.dialer = d }
 }
 
 // WithMaxPDU sets the maximum PDU size to request

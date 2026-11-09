@@ -430,6 +430,14 @@ const (
 )
 ```
 
+### type Dialer
+
+```go
+type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
+```
+
+Dialer opens the transport connection to addr ("host:port"). It receives network "tcp". Like net.Dialer, it returns a non-nil connection exactly when the error is nil.
+
 ### type DiscoverOption
 
 ```go
@@ -556,6 +564,14 @@ func WithAutoRackSlot(brute bool) Option
 ```
 
 WithAutoRackSlot enables automatic rack/slot detection during connect.
+
+#### func WithDialer
+
+```go
+func WithDialer(d Dialer) Option
+```
+
+WithDialer sets the function that opens the TCP connection of Connect, for example to apply an address allowlist or to dial through a proxy. A nil dialer (the default) uses net.Dialer with the timeout of WithTimeout; a custom dialer is called with a context that already carries that timeout and should honor it. The context is cancelled once the dial returns, so the connection must not depend on it. Discover, ProbeRackSlots and CompareRead always dial directly.
 
 #### func WithLogger
 

@@ -159,7 +159,7 @@ func (c *Client) connectOnce(ctx context.Context, rack, slot int) error {
 			return &ValidationError{Message: err.Error()}
 		}
 	}
-	conn, err := dialCOTP(ctx, addr, timeout, local, remote)
+	conn, err := dialCOTP(ctx, addr, timeout, c.opts.dialer, local, remote)
 	if err != nil {
 		return err
 	}
