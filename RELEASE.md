@@ -1,5 +1,24 @@
 # go-s7comm Releases
 
+## Unreleased
+
+### Summary
+
+Chaos coverage for the scan helpers' dialer added in v0.14.0, more unit tests for it, and documentation catch-up. No code change.
+
+### Tests
+
+- `e2e/scan_dialer_chaos_test.go`: `Discover`, `ProbeRackSlots` (strict) and `CompareRead` through a dialer that redirects an unroutable address to the simulated PLC and gives every connection of a call one seeded transport fault (one-byte reads, a cut after n incoming or outgoing bytes, a flipped byte, a silent peer), 60 calls each. Each returns within its timeouts, a fragmenting transport finds, confirms and reads, no probe candidate is classed at the TCP stage, a successful read returns the PLC's memory unless a byte was flipped, and every other fault makes some call fail.
+- `client/scan_dialer_test.go`: a probe dialer returning no connection, or a connection with an error (closed); parent-context cancel during a `Discover` and a `CompareRead` dial.
+
+### Documentation
+
+- README.md, ARCHITECTURE.md, TESTING.md and the package doc describe the scan helpers' dialers.
+- API.md and the `CompareRead` doc comment: `CompareReadRequest.Timeout` bounds each candidate's connect, not its read; pass a `ctx` with a deadline.
+- docs/FEATURE-STATUS.md: status v0.14.0, version rows for v0.13.x and v0.14.x.
+
+---
+
 ## v0.14.0
 
 **Date:** 2026-11-09

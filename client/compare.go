@@ -65,6 +65,8 @@ func compareCandidateFailure(c RackSlot, size int, err error) CompareReadCandida
 // Each candidate uses a new connection (connect, read, close). If Parallelism > 1, up to that many
 // connections run concurrently; results are still in candidate order. If all candidates return
 // ReadStatusSuccess and the returned data is identical, RackSlotInsensitive is set true.
+// Timeout bounds each candidate's connect, not the read that follows: pass a ctx
+// with a deadline, or a peer that goes silent after setup blocks the call.
 // Invalid request (negative size/offset/DBNumber for DB) returns an error.
 func CompareRead(ctx context.Context, req CompareReadRequest) (*CompareReadResult, error) {
 	if err := validateCompareReadRequest(req); err != nil {
