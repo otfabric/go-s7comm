@@ -10,7 +10,6 @@ What go-s7comm does not do, or does only partly. API behaviour is in [API.md](AP
 - **Timer and counter addresses**: the server reads the S7ANY address of a timer or counter as its element number. The recordings address only T0 and C0, which cannot tell a number from another reading; Snap7's server uses another mapping (`Start >> 1`).
 - **Block download and PLC start/stop**: `wire` names these function codes, but `client` has no operation for them. Blocks can be listed, inspected and uploaded.
 - **`Discover`** is IPv4 only and rejects ranges larger than `/12`.
-- **`WithDialer`** applies to `Connect` only: `Discover`, `ProbeRackSlots` and `CompareRead` always dial with `net.Dialer`, so an allowlist or proxy set as a client's dialer does not cover them.
 
 ## Behaviour to plan for
 

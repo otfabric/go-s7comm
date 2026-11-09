@@ -372,6 +372,10 @@ type CompareReadRequest struct {
 	// Parallelism limits concurrent connections. Zero or negative is treated as 1 (sequential).
 	// Results remain in candidate order. Aligns with probe/discovery parallelism options.
 	Parallelism int
+	// Dialer opens each candidate's TCP connection, as WithDialer does for
+	// Connect. Nil (the default) uses net.Dialer. It is called concurrently when
+	// Parallelism > 1. It is not serialized to JSON.
+	Dialer Dialer `json:"-"`
 }
 ```
 
@@ -445,6 +449,14 @@ type DiscoverOption func(*discoverOpts)
 ```
 
 DiscoverOption configures discovery
+
+#### func WithDiscoverDialer
+
+```go
+func WithDiscoverDialer(d Dialer) DiscoverOption
+```
+
+WithDiscoverDialer sets the function that opens each probe's TCP connection, as WithDialer does for Connect. Nil (the default) uses net.Dialer. It is called with a context bounded by the discover timeout, and concurrently up to the discover parallelism. Dial errors count as a failed rack/slot attempt.
 
 #### func WithDiscoverJitter
 
@@ -571,7 +583,7 @@ WithAutoRackSlot enables automatic rack/slot detection during connect.
 func WithDialer(d Dialer) Option
 ```
 
-WithDialer sets the function that opens the TCP connection of Connect, for example to apply an address allowlist or to dial through a proxy. A nil dialer (the default) uses net.Dialer with the timeout of WithTimeout; a custom dialer is called with a context that already carries that timeout and should honor it. The context is cancelled once the dial returns, so the connection must not depend on it. Discover, ProbeRackSlots and CompareRead always dial directly.
+WithDialer sets the function that opens the TCP connection of Connect, for example to apply an address allowlist or to dial through a proxy. A nil dialer (the default) uses net.Dialer with the timeout of WithTimeout; a custom dialer is called with a context that already carries that timeout and should honor it. The context is cancelled once the dial returns, so the connection must not depend on it. For the scan helpers, use WithDiscoverDialer, RackSlotProbeRequest.Dialer and CompareReadRequest.Dialer.
 
 #### func WithLogger
 
@@ -752,6 +764,12 @@ type RackSlotProbeRequest struct {
 	RetryDelay time.Duration
 	// StopOnFirstConfirmed: in strict mode, stop after first valid-query (Phase 2; reserved).
 	StopOnFirstConfirmed bool
+
+	// Dialer opens each attempt's TCP connection, as WithDialer does for
+	// Connect. Nil (the default) uses net.Dialer. It is called with a context
+	// bounded by Timeout, and concurrently when Parallelism > 1. It is not
+	// serialized to JSON.
+	Dialer Dialer `json:"-"`
 }
 ```
 

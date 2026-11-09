@@ -109,8 +109,8 @@ type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
 // dialer (the default) uses net.Dialer with the timeout of WithTimeout; a
 // custom dialer is called with a context that already carries that timeout
 // and should honor it. The context is cancelled once the dial returns, so the
-// connection must not depend on it. Discover, ProbeRackSlots and CompareRead
-// always dial directly.
+// connection must not depend on it. For the scan helpers, use
+// WithDiscoverDialer, RackSlotProbeRequest.Dialer and CompareReadRequest.Dialer.
 func WithDialer(d Dialer) Option {
 	return func(o *options) { o.dialer = d }
 }
