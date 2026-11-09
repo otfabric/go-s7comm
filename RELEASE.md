@@ -1,6 +1,9 @@
 # go-s7comm Releases
 
-## Unreleased
+## v0.14.0
+
+**Date:** 2026-11-09
+**Previous release:** v0.13.0
 
 ### Summary
 
@@ -10,9 +13,9 @@ The scan helpers take a `client.Dialer` too, so an allowlist or proxy covers eve
 
 - `client`: `WithDiscoverDialer` for `Discover`, and a `Dialer` field on `RackSlotProbeRequest` (`ProbeRackSlots`) and `CompareReadRequest` (`CompareRead`). Each attempt's dial goes through it with network `"tcp"`, `host:port` and a context bounded by the helper's timeout; it is called concurrently when the helper runs in parallel. A nil dialer uses `net.Dialer` as before. A dial error is wrapped as `TCP connect: …`: in `RackSlotCandidate.Error` (stage `tcp`, status `unreachable`, or `timeout` on a deadline) and in `ReadResult.Cause` for `CompareRead`; `Discover` counts it as a failed rack/slot attempt. The new fields are tagged `json:"-"`, so results that echo the request still marshal.
 
-### Changed
+### Breaking changes
 
-- `client`: `RackSlotProbeRequest` is no longer comparable with `==`, because it now holds a func field. `CompareReadRequest` already held a slice.
+- `client`: `RackSlotProbeRequest` is no longer comparable with `==`, because it now holds a func field. Code that compares two requests with `==`, or uses one as a map key, no longer compiles; compare the fields it needs instead. `CompareReadRequest` already held a slice and was not comparable before.
 
 ### Tests
 
