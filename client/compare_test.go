@@ -5,6 +5,7 @@ package client
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -273,5 +274,37 @@ func BenchmarkCompareReadManyCandidates(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = CompareRead(ctx, req)
+	}
+}
+
+// A peer that accepts setup and then never answers the read must not block
+// CompareRead: Timeout bounds the read too, even when ctx has no deadline.
+func TestCompareRead_TimeoutBoundsSilentRead(t *testing.T) {
+	port := startScriptedPeer(t, nil, nil)
+	const timeout = 150 * time.Millisecond
+	start := time.Now()
+	result, err := CompareRead(context.Background(), CompareReadRequest{
+		Address:     "127.0.0.1",
+		Port:        port,
+		Candidates:  []RackSlot{{0, 1}, {0, 2}},
+		Area:        model.AreaDB,
+		DBNumber:    1,
+		Size:        4,
+		Timeout:     timeout,
+		Parallelism: 2,
+	})
+	if err != nil {
+		t.Fatalf("CompareRead: %v", err)
+	}
+	if el := time.Since(start); el > 2*timeout+time.Second {
+		t.Fatalf("CompareRead took %v, want about the read timeout %v", el, timeout)
+	}
+	for _, c := range result.ByCandidate {
+		if c.Result.Status != ReadStatusTimeout || !errors.Is(c.Result.Cause, context.DeadlineExceeded) {
+			t.Errorf("rack %d slot %d: status %v cause %v, want a read timeout", c.Rack, c.Slot, c.Result.Status, c.Result.Cause)
+		}
+	}
+	if result.RackSlotInsensitive {
+		t.Error("RackSlotInsensitive = true although every read timed out")
 	}
 }

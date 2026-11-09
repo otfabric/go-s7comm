@@ -368,7 +368,8 @@ type CompareReadRequest struct {
 	DBNumber   int
 	Offset     int
 	Size       int
-	Timeout    time.Duration
+	// Timeout bounds each candidate's connect and, separately, its read. 0 = 5s.
+	Timeout time.Duration
 	// Parallelism limits concurrent connections. Zero or negative is treated as 1 (sequential).
 	// Results remain in candidate order. Aligns with probe/discovery parallelism options.
 	Parallelism int
@@ -399,7 +400,7 @@ CompareReadResult holds one ReadResult per candidate and whether all candidates 
 func CompareRead(ctx context.Context, req CompareReadRequest) (*CompareReadResult, error)
 ```
 
-CompareRead performs the same read for each rack/slot candidate and reports whether results are identical. Use it to test whether a target responds identically across multiple rack/slot candidates. Each candidate uses a new connection (connect, read, close). If Parallelism > 1, up to that many connections run concurrently; results are still in candidate order. If all candidates return ReadStatusSuccess and the returned data is identical, RackSlotInsensitive is set true. Timeout bounds each candidate's connect, not the read that follows: pass a ctx with a deadline, or a peer that goes silent after setup blocks the call. Invalid request (negative size/offset/DBNumber for DB) returns an error.
+CompareRead performs the same read for each rack/slot candidate and reports whether results are identical. Use it to test whether a target responds identically across multiple rack/slot candidates. Each candidate uses a new connection (connect, read, close). If Parallelism > 1, up to that many connections run concurrently; results are still in candidate order. If all candidates return ReadStatusSuccess and the returned data is identical, RackSlotInsensitive is set true. Timeout (default 5s) bounds each candidate's connect and, separately, its read, so a peer that goes silent after setup cannot block the call. Invalid request (negative size/offset/DBNumber for DB) returns an error.
 
 ### type Confidence
 

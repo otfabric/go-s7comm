@@ -178,9 +178,9 @@ func TestScanDialerFaultsDuringProbe(t *testing.T) {
 	reportFaults(t, &failed, &succeeded)
 }
 
-// CompareRead through a faulting dialer. Its Timeout bounds each candidate's
-// Connect, not the read that follows (API.md), so the caller bounds the call;
-// it must return within that bound. A candidate that succeeds returns the PLC
+// CompareRead through a faulting dialer, with no deadline on ctx: Timeout
+// bounds each candidate's connect and its read, so every call must return
+// within twice the timeout even when the peer goes silent. A candidate that succeeds returns the PLC
 // memory unless a byte was flipped (S7 has no checksum), and
 // RackSlotInsensitive is never true when a candidate failed.
 func TestScanDialerFaultsDuringCompareRead(t *testing.T) {
@@ -196,16 +196,14 @@ func TestScanDialerFaultsDuringCompareRead(t *testing.T) {
 	for i := range 60 {
 		f := fault{kind: 1 + rng.IntN(faultCount-1), n: rng.IntN(110)}
 		d.cur.Store(&f)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*timeout)
 		start := time.Now()
-		res, err := client.CompareRead(ctx, client.CompareReadRequest{
+		res, err := client.CompareRead(context.Background(), client.CompareReadRequest{
 			Address:    unroutable,
 			Candidates: []client.RackSlot{{Rack: 0, Slot: 1}, {Rack: 0, Slot: 2}},
 			Area:       model.AreaDB, DBNumber: 1, Offset: 32, Size: len(want),
 			Timeout: timeout, Parallelism: 2,
 			Dialer: d.dial,
 		})
-		cancel()
 		if err != nil {
 			t.Fatalf("attempt %d (%s n=%d): CompareRead: %v", i, faultNames[f.kind], f.n, err)
 		}

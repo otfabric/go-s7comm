@@ -49,7 +49,7 @@ Package `server` lets anyone who reaches its port read and write all of its memo
 
 ### Timeouts
 
-- `WithTimeout` bounds `Connect` (dial and handshake) only. Reads, writes and uploads are bounded by the context you pass; use `context.WithTimeout` or `WithDeadline`, or an unresponsive peer can block a call indefinitely
+- `WithTimeout` bounds `Connect` (dial and handshake) only. Reads, writes and uploads are bounded by the context you pass; use `context.WithTimeout` or `WithDeadline`, or an unresponsive peer can block a call indefinitely. The scan helpers bound every step by their own timeout, including the read of `CompareRead`
 
 ### Input Handling
 
