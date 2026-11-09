@@ -63,7 +63,7 @@ Behavior notes:
 
 - Connect performs TCP dial, go-cotp TP0 handshake (`cotp.Connect` with two-byte big-endian TSAP selectors), and S7 setup communication. S7 PDUs are exchanged as complete TSDUs (`WriteTSDU` / `ReadTSDU`). Default COTP `MaxTPDULength` offer is 1024.
 - A second Connect() on an already-connected client only replaces the session after the new handshake succeeds; a failed reconnect leaves the existing session intact.
-- **Context:** cancel (with or without deadline) is honored on dial and TSDU I/O via go-cotp; mid-I/O cancel aborts the session. `WithTimeout` bounds Connect, not later PDUs. See [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
+- **Context:** cancel (with or without deadline) is honored on dial (by a custom `Dialer` only if it honors `ctx`) and TSDU I/O via go-cotp; mid-I/O cancel aborts the session. `WithTimeout` bounds Connect, not later PDUs. See [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
 - On setup failure of a new dial, that connection is closed; a prior healthy session is left intact until a successful swap.
 - Close maps a successful local go-cotp close (`cotp.ErrClosed`) to a nil error.
 - Invalid caller input (port, timeout, max PDU, rack/slot) returns `*ValidationError`.
@@ -476,7 +476,7 @@ Defaults:
 path. `NewSlogLogger` adapts `log/slog` without changing the interface.
 `NewSlogLogger(nil)` is a no-op. See [OBSERVABILITY.md](OBSERVABILITY.md).
 
-`WithTSAP` selects explicit local/remote TSAPs (skips rack/slot packing). `WithAutoRackSlot` tries common rack/slot pairs (or a brute range when `brute` is true); when every pair fails, its error does not wrap the `Dialer` error.
+`WithTSAP` selects explicit local/remote TSAPs (skips rack/slot packing). `WithAutoRackSlot` tries common rack/slot pairs (or a brute range when `brute` is true); when every pair fails, the error wraps the last attempt's error.
 
 ## model
 

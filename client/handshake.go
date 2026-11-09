@@ -35,6 +35,10 @@ func dialTCP(ctx context.Context, address string, timeout time.Duration, dial Di
 	}
 	raw, err := dial(ctx, "tcp", address)
 	if err != nil {
+		if raw != nil {
+			// A misbehaving dialer returned a connection with its error; do not leak it.
+			_ = raw.Close()
+		}
 		return nil, fmt.Errorf("TCP connect: %w", err)
 	}
 	if raw == nil {

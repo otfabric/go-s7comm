@@ -6,6 +6,10 @@
 
 - `client`: `WithDialer` and the `Dialer` type set the function that opens the TCP connection of `Connect`, so a caller can apply an address allowlist or dial through a proxy. The default is unchanged.
 
+### Changed
+
+- `client`: with `WithAutoRackSlot`, the error returned when every rack/slot pair fails now wraps the last attempt's error (`…: <cause>`), so `errors.Is` / `errors.As` reach it.
+
 ## v0.12.0
 
 **Date:** 2026-11-07
