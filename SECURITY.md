@@ -43,6 +43,10 @@ Package `server` lets anyone who reaches its port read and write all of its memo
 - `Discover` is IPv4 only and rejects ranges larger than `/12`; prefer `/24` or smaller in OT networks. Its defaults are 10 parallel hosts and a 2 s timeout; `WithDiscoverSafetyMode(client.SafetyConservative)` lowers that to 3 in parallel with a 50 ms delay between rack/slot attempts (`WithDiscoverRateLimit` sets that delay directly)
 - `WithRateLimit` on a client adds a delay between the chunks of a read that spans several PDUs
 
+### Restricting Destinations
+
+`WithDialer` sets the function that opens the TCP connection of `Connect`. An application that lets users reach only approved hosts should enforce the allowlist there, for example in a `net.Dialer.Control` hook, which sees the resolved IP right before connecting; checking the host name before `Connect` leaves a DNS-rebinding gap. `Discover`, `ProbeRackSlots` and `CompareRead` do not use a client's dialer: check their targets yourself, or do not expose them.
+
 ### Timeouts
 
 - `WithTimeout` bounds `Connect` (dial and handshake) only. Reads, writes and uploads are bounded by the context you pass; use `context.WithTimeout` or `WithDeadline`, or an unresponsive peer can block a call indefinitely

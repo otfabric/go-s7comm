@@ -30,6 +30,7 @@ The module is pure Go; go-cotp and go-tpkt are its only dependencies, apart from
 | Feature | API | Status | Fake server | Independent |
 |---|---|---|---|---|
 | Session setup (TCP, COTP TP0, S7 setup) | `Connect`, `Close`, `WithRackSlot`, `WithTSAP` | ✅ | yes | yes (rack/slot options) |
+| Custom dialer (allowlist, proxy, in-memory transport) | `WithDialer`, `Dialer` | ◐ `Connect` only; not `Discover`, `ProbeRackSlots`, `CompareRead` | yes; e2e faults the connect exchange through it | no |
 | Reconnect | repeated `Connect`, new client | ✅ | failed attempt only | new client after `Close` (`reconnect-state`) |
 | Byte read, DB | `ReadDB`, `ReadArea` | ✅ | yes | yes |
 | Byte read, markers, inputs, outputs | `ReadMerkers`, `ReadInputs`, `ReadOutputs`, `ReadArea` | ✅ | yes | yes |

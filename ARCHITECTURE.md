@@ -23,7 +23,7 @@ The arrows follow the import graph (`go list -f '{{.Imports}}' ./...`).
 
 `server` (the in-memory test server) imports `wire` and go-cotp, like `client`, and nothing else of this module.
 
-- **`client`** owns the connection: TCP dial, COTP connect through go-cotp, S7 setup communication, and every request/response exchange.
+- **`client`** owns the connection: TCP dial (by the `WithDialer` function when one is set), COTP connect through go-cotp, S7 setup communication, and every request/response exchange.
 - **`wire`** encodes and parses S7 PDUs and TSAPs. It performs no I/O. It is strict on framing and declared lengths and leaves semantic interpretation to `client` and `model` ([wire/doc.go](wire/doc.go)).
 - **`model`** holds transport-agnostic value types. `model/codec` is its only module dependency.
 - **`server`** accepts COTP connections through go-cotp and answers jobs with the `wire` server codec from memory it holds. It does not import `client`.

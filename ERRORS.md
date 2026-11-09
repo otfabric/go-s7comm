@@ -242,7 +242,8 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
 
 ## Context, reconnect, and concurrency
 
-- **Cancel without deadline** is effective on TCP dial and go-cotp `WriteTSDU` /
+- **Cancel without deadline** is effective on TCP dial (with a custom `Dialer`,
+  only if it honors `ctx`) and go-cotp `WriteTSDU` /
   `ReadTSDU` (go-cotp arms a watcher that forces a past deadline on `ctx.Done`).
   Mid-I/O cancel usually **aborts** the COTP connection — treat the client as
   disconnected and call `Connect` again.
@@ -250,6 +251,9 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
   operation. Client option `WithTimeout` applies to **Connect**/dial (and is
   wrapped into the COTP and S7 setup contexts); it does **not** automatically bound later
   `ReadArea` / `sendReceive` calls.
+- A `Dialer` error is returned wrapped as `TCP connect: …`, so `errors.Is` /
+  `errors.As` reach it. With `WithAutoRackSlot`, the final
+  `auto rack/slot connect failed …` error wraps the last attempt's error.
 - Without cancel **and** without a deadline, open-session TSDU I/O can block
   indefinitely.
 - Rate-limit waits, multi-chunk loops, discover/probe between jobs, and

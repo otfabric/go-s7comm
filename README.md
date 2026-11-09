@@ -48,7 +48,8 @@ The library provides:
 
 Full guide (statuses, sentinels, wire `S7Error`, CLI exit-code contract): **[ERRORS.md](ERRORS.md)**. API signatures: **[API.md](API.md)**.
 
-**Context:** cancel without a deadline **is** effective on TCP dial and go-cotp
+**Context:** cancel without a deadline **is** effective on TCP dial (with a
+custom `WithDialer`, only if it honours the context) and go-cotp
 TSDU I/O (via go-cotp’s deadline watcher), but mid-I/O cancel typically **aborts**
 the COTP session — reconnect afterward. Prefer `context.WithTimeout` /
 `WithDeadline` for wall-clock bounds. Client `WithTimeout` bounds **Connect**

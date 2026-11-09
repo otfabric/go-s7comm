@@ -109,18 +109,21 @@ func (c *Client) Connect(ctx context.Context) error {
 }
 
 func (c *Client) autoConnect(ctx context.Context) error {
+	// lastErr is wrapped into the final error so errors.Is / errors.As reach,
+	// for example, a Dialer error.
+	var lastErr error
 	if c.opts.bruteRackSlot {
 		for rack := 0; rack <= 3; rack++ {
 			for slot := 0; slot <= 5; slot++ {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if err := c.connectOnce(ctx, rack, slot); err == nil {
+				if lastErr = c.connectOnce(ctx, rack, slot); lastErr == nil {
 					return nil
 				}
 			}
 		}
-		return fmt.Errorf("auto rack/slot connect failed for rack 0-3 slot 0-5")
+		return fmt.Errorf("auto rack/slot connect failed for rack 0-3 slot 0-5: %w", lastErr)
 	}
 
 	common := [][2]int{{0, 1}, {0, 2}, {0, 0}, {1, 1}, {0, 3}}
@@ -128,12 +131,12 @@ func (c *Client) autoConnect(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := c.connectOnce(ctx, rs[0], rs[1]); err == nil {
+		if lastErr = c.connectOnce(ctx, rs[0], rs[1]); lastErr == nil {
 			return nil
 		}
 	}
 
-	return fmt.Errorf("auto rack/slot connect failed on common rack/slot pairs")
+	return fmt.Errorf("auto rack/slot connect failed on common rack/slot pairs: %w", lastErr)
 }
 
 func (c *Client) connectOnce(ctx context.Context, rack, slot int) error {
@@ -159,7 +162,7 @@ func (c *Client) connectOnce(ctx context.Context, rack, slot int) error {
 			return &ValidationError{Message: err.Error()}
 		}
 	}
-	conn, err := dialCOTP(ctx, addr, timeout, local, remote)
+	conn, err := dialCOTP(ctx, addr, timeout, c.opts.dialer, local, remote)
 	if err != nil {
 		return err
 	}
