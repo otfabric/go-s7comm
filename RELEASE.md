@@ -1,14 +1,36 @@
 # go-s7comm Releases
 
-## Unreleased
+## v0.13.0
+
+**Date:** 2026-11-09
+**Previous release:** v0.12.0
+
+### Summary
+
+`client.WithDialer` lets the caller supply the function that opens the TCP connection of `Connect`: an address allowlist that checks the resolved IP right before connecting (no DNS-rebinding gap), a SOCKS or HTTP proxy, or an in-memory transport in tests. The default is unchanged. Contributed by @umpfel ([#27](https://github.com/otfabric/go-s7comm/pull/27)).
 
 ### Added
 
-- `client`: `WithDialer` and the `Dialer` type set the function that opens the TCP connection of `Connect`, so a caller can apply an address allowlist or dial through a proxy. The default is unchanged.
+- `client`: `WithDialer` and the `Dialer` type, `func(ctx, network, addr string) (net.Conn, error)`. The dialer gets network `"tcp"`, `host:port` and a context carrying the `WithTimeout` deadline; its error comes back wrapped as `TCP connect: …`, so `errors.Is` / `errors.As` reach it. A dialer returning no connection and no error fails `Connect`; a connection returned together with an error is closed. `Discover`, `ProbeRackSlots` and `CompareRead` keep dialing directly ([LIMITATIONS.md](LIMITATIONS.md#scope-not-implemented)).
 
 ### Changed
 
-- `client`: with `WithAutoRackSlot`, the error returned when every rack/slot pair fails now wraps the last attempt's error (`…: <cause>`), so `errors.Is` / `errors.As` reach it.
+- `client`: with `WithAutoRackSlot`, the error returned when every rack/slot pair fails now wraps the last attempt's error (`auto rack/slot connect failed …: <cause>`). The message keeps its prefix; code matching the whole string must allow the suffix.
+
+### Tests
+
+- `client/dialer_test.go`: the dialer's network, address and deadline; wrapped errors; no connection; connection with an error closed; `WithAutoRackSlot` (5 common and 24 brute attempts, and success on the first pair); `WithTSAP`; parent-context cancel; timeout expiry; nil dialer.
+- `e2e/dialer_chaos_test.go`: through `WithDialer`, 120 seeded reconnects each get one transport fault in the TCP, COTP and S7 setup exchange (one-byte reads, a cut after n incoming or outgoing bytes, a flipped byte, a silent peer). Each returns within its timeout, a fragmenting transport connects, and a failed reconnect leaves the established session working.
+
+### Documentation
+
+- SECURITY.md: enforce allowlists in the dialer; scans and probes do not use it. LIMITATIONS.md, README.md, API.md, ARCHITECTURE.md, ERRORS.md, TESTING.md and docs/FEATURE-STATUS.md describe the dialer.
+
+### Interoperability
+
+No wire change: the interop matrix runs unchanged with the default dialer.
+
+---
 
 ## v0.12.0
 
