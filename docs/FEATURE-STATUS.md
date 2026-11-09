@@ -1,6 +1,6 @@
 # Feature status
 
-What go-s7comm implements and how far each part has been verified. Status: v0.14.0.
+What go-s7comm implements and how far each part has been verified. Status: v0.15.0.
 
 None of this is a conformance claim: nothing is certified, no Siemens test has been run, and this repository holds no test against a physical PLC ([LIMITATIONS.md](../LIMITATIONS.md)).
 
@@ -8,7 +8,8 @@ None of this is a conformance claim: nothing is certified, no Siemens test has b
 
 | go-s7comm | Go | snap7-interop | Supported |
 |---|---|---|---|
-| v0.14.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | latest release ([SECURITY.md](../SECURITY.md)) |
+| v0.15.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | latest release ([SECURITY.md](../SECURITY.md)) |
+| v0.14.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | no |
 | v0.13.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | no |
 | v0.12.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | no |
 | v0.11.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | no |

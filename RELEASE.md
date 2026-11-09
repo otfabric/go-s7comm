@@ -1,14 +1,21 @@
 # go-s7comm Releases
 
-## Unreleased
+## v0.15.0
+
+**Date:** 2026-11-09
+**Previous release:** v0.14.0
 
 ### Summary
 
 `CompareRead` no longer hangs on a peer that goes silent after setup: its `Timeout` now bounds each candidate's read as well as its connect. Also chaos coverage for the scan helpers' dialer added in v0.14.0, more unit tests for it, and documentation catch-up.
 
+### Breaking changes
+
+- `client`: `CompareRead` now times out a candidate whose read takes longer than `CompareReadRequest.Timeout` (default 5s). Before, a slow peer that answered within the caller's `ctx` deadline but after `Timeout` succeeded; it now reports `ReadStatusTimeout`. Raise `Timeout` for such peers.
+
 ### Fixed
 
-- `client`: `CompareRead` bounds each candidate's read by `CompareReadRequest.Timeout` (default 5s), as it already did its connect. Before, the read ran on the caller's `ctx` alone, so a peer that accepted setup and then went silent blocked a caller without a deadline indefinitely. A read that runs out of time now reports `ReadStatusTimeout`, wrapping `context.DeadlineExceeded`. A slow peer that answered within the caller's deadline but after `Timeout` now times out instead: raise `Timeout` for such peers.
+- `client`: `CompareRead` bounds each candidate's read by `CompareReadRequest.Timeout` (default 5s), as it already did its connect. Before, the read ran on the caller's `ctx` alone, so a peer that accepted setup and then went silent blocked a caller without a deadline indefinitely. A read that runs out of time now reports `ReadStatusTimeout`, wrapping `context.DeadlineExceeded`.
 
 ### Tests
 
@@ -20,7 +27,7 @@
 
 - README.md, ARCHITECTURE.md, TESTING.md and the package doc describe the scan helpers' dialers.
 - API.md, the `CompareRead` doc comment and the `CompareReadRequest.Timeout` field comment: `Timeout` bounds each candidate's connect and its read.
-- docs/FEATURE-STATUS.md: status v0.14.0, version rows for v0.13.x and v0.14.x.
+- docs/FEATURE-STATUS.md: status v0.15.0, version rows for v0.13.x, v0.14.x and v0.15.x.
 
 ---
 
