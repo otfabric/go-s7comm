@@ -238,7 +238,7 @@ type CompareReadResult struct {
 func CompareRead(ctx context.Context, req CompareReadRequest) (*CompareReadResult, error)
 ```
 
-Behavior: For each candidate, creates a client, connects with that rack/slot, performs one read, closes. RackSlotInsensitive is true only when every candidate succeeded and all returned identical data.
+Behavior: For each candidate, creates a client, connects with that rack/slot (through `Dialer` when set), performs one read, closes. RackSlotInsensitive is true only when every candidate succeeded and all returned identical data. `Timeout` (default 5s) bounds each candidate's connect and, separately, its read, so a peer that goes silent after setup cannot block the call; `ctx` can bound it further.
 
 ### Discovery API
 

@@ -86,6 +86,8 @@
 // where possible, set WithDiscoverTimeout/WithTimeout, and use moderate Parallelism.
 // SafetyMode (conservative/normal/aggressive), optional jitter, and max attempts per host
 // are supported for ProbeRackSlots and Discover to reduce connection churn on sensitive OT networks.
+// Each helper dials through a Dialer when one is set (WithDiscoverDialer,
+// RackSlotProbeRequest.Dialer, CompareReadRequest.Dialer), as Connect does with WithDialer.
 //
 // ProbeReadableRanges runs over a single client connection; probes are serialized.
 // RangeProbeRequest.Parallelism is retained for API consistency but does not increase

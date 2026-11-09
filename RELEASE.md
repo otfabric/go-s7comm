@@ -1,5 +1,36 @@
 # go-s7comm Releases
 
+## v0.15.0
+
+**Date:** 2026-11-09
+**Previous release:** v0.14.0
+
+### Summary
+
+`CompareRead` no longer hangs on a peer that goes silent after setup: its `Timeout` now bounds each candidate's read as well as its connect. Also chaos coverage for the scan helpers' dialer added in v0.14.0, more unit tests for it, and documentation catch-up.
+
+### Breaking changes
+
+- `client`: `CompareRead` now times out a candidate whose read takes longer than `CompareReadRequest.Timeout` (default 5s). Before, a slow peer that answered within the caller's `ctx` deadline but after `Timeout` succeeded; it now reports `ReadStatusTimeout`. Raise `Timeout` for such peers.
+
+### Fixed
+
+- `client`: `CompareRead` bounds each candidate's read by `CompareReadRequest.Timeout` (default 5s), as it already did its connect. Before, the read ran on the caller's `ctx` alone, so a peer that accepted setup and then went silent blocked a caller without a deadline indefinitely. A read that runs out of time now reports `ReadStatusTimeout`, wrapping `context.DeadlineExceeded`.
+
+### Tests
+
+- `e2e/scan_dialer_chaos_test.go`: `Discover`, `ProbeRackSlots` (strict) and `CompareRead` through a dialer that redirects an unroutable address to the simulated PLC and gives every connection of a call one seeded transport fault (one-byte reads, a cut after n incoming or outgoing bytes, a flipped byte, a silent peer), 60 calls each, `CompareRead` with no deadline on `ctx`. Each returns within its timeouts, a fragmenting transport finds, confirms and reads, no probe candidate is classed at the TCP stage, a successful read returns the PLC's memory unless a byte was flipped, and every other fault makes some call fail.
+- `client/compare_test.go`: `CompareRead` against a peer that accepts setup and never answers the read returns read timeouts within `Timeout` (it hung before the fix).
+- `client/scan_dialer_test.go`: a probe dialer returning no connection, or a connection with an error (closed); parent-context cancel during a `Discover` and a `CompareRead` dial.
+
+### Documentation
+
+- README.md, ARCHITECTURE.md, TESTING.md and the package doc describe the scan helpers' dialers.
+- API.md, the `CompareRead` doc comment and the `CompareReadRequest.Timeout` field comment: `Timeout` bounds each candidate's connect and its read.
+- docs/FEATURE-STATUS.md: status v0.15.0, version rows for v0.13.x, v0.14.x and v0.15.x.
+
+---
+
 ## v0.14.0
 
 **Date:** 2026-11-09

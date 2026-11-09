@@ -280,3 +280,79 @@ func TestScanRequestsJSONWithDialer(t *testing.T) {
 		}
 	}
 }
+
+func TestProbeRackSlotsDialerNoConnection(t *testing.T) {
+	dial := func(context.Context, string, string) (net.Conn, error) { return nil, nil }
+	result, err := ProbeRackSlots(context.Background(), RackSlotProbeRequest{
+		Address: "192.0.2.1", RackMin: 0, RackMax: 0, SlotMin: 1, SlotMax: 1,
+		Timeout: time.Second, Parallelism: 1, Dialer: dial,
+	})
+	if err != nil {
+		t.Fatalf("ProbeRackSlots: %v", err)
+	}
+	c := result.Candidates[0]
+	if c.Stage != ProbeStageTCP || c.Status != StatusUnreachable || !strings.Contains(c.Error, "dialer returned no connection") {
+		t.Fatalf("candidate = %+v, want tcp/unreachable with the no-connection error", c)
+	}
+}
+
+func TestProbeRackSlotsDialerConnAndErrorClosed(t *testing.T) {
+	a, b := net.Pipe()
+	defer func() { _ = a.Close(); _ = b.Close() }()
+	tracked := &closeTrackingConn{Conn: a}
+	dial := func(context.Context, string, string) (net.Conn, error) { return tracked, errScanBlocked }
+	result, err := ProbeRackSlots(context.Background(), RackSlotProbeRequest{
+		Address: "192.0.2.1", RackMin: 0, RackMax: 0, SlotMin: 1, SlotMax: 1,
+		Timeout: time.Second, Parallelism: 1, Dialer: dial,
+	})
+	if err != nil {
+		t.Fatalf("ProbeRackSlots: %v", err)
+	}
+	if !tracked.closed.Load() {
+		t.Error("connection returned together with an error was not closed")
+	}
+	if result.Candidates[0].Status != StatusUnreachable {
+		t.Errorf("status = %q, want unreachable", result.Candidates[0].Status)
+	}
+}
+
+func TestCompareReadDialerParentCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dial := func(ctx context.Context, _, _ string) (net.Conn, error) {
+		cancel()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	result, err := CompareRead(ctx, CompareReadRequest{
+		Address: "192.0.2.1", Candidates: []RackSlot{{0, 1}, {0, 2}},
+		Area: model.AreaDB, DBNumber: 1, Size: 2, Dialer: dial,
+	})
+	if err != nil {
+		t.Fatalf("CompareRead: %v", err)
+	}
+	for _, c := range result.ByCandidate {
+		if !errors.Is(c.Result.Cause, context.Canceled) {
+			t.Errorf("rack %d slot %d: cause %v, want context.Canceled", c.Rack, c.Slot, c.Result.Cause)
+		}
+	}
+}
+
+func TestDiscoverDialerParentCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	dial := func(ctx context.Context, _, _ string) (net.Conn, error) {
+		calls.Add(1)
+		cancel()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	_, err := Discover(ctx, "192.0.2.1/32", WithDiscoverRackSlotRange(0, 0, 0, 5), WithDiscoverDialer(dial))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Discover error = %v, want context.Canceled", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("dialer called %d times after cancel, want 1", got)
+	}
+}

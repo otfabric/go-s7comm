@@ -1,6 +1,6 @@
 # Feature status
 
-What go-s7comm implements and how far each part has been verified. Status: v0.12.0.
+What go-s7comm implements and how far each part has been verified. Status: v0.15.0.
 
 None of this is a conformance claim: nothing is certified, no Siemens test has been run, and this repository holds no test against a physical PLC ([LIMITATIONS.md](../LIMITATIONS.md)).
 
@@ -8,7 +8,10 @@ None of this is a conformance claim: nothing is certified, no Siemens test has b
 
 | go-s7comm | Go | snap7-interop | Supported |
 |---|---|---|---|
-| v0.12.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | latest release ([SECURITY.md](../SECURITY.md)) |
+| v0.15.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | latest release ([SECURITY.md](../SECURITY.md)) |
+| v0.14.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | no |
+| v0.13.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | no |
+| v0.12.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | no |
 | v0.11.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1) | no |
 | v0.10.x | 1.26 or later (CI: 1.26 and 1.27) | v0.6.1 (contract 1.1); v0.10.0 and v0.10.1 tested against v0.3.0 (contract 1.0) | no |
 | v0.9.x | 1.26 or later (CI: 1.26 and 1.27) | v0.3.0 (contract 1.0) | no |
@@ -30,7 +33,7 @@ The module is pure Go; go-cotp and go-tpkt are its only dependencies, apart from
 | Feature | API | Status | Fake server | Independent |
 |---|---|---|---|---|
 | Session setup (TCP, COTP TP0, S7 setup) | `Connect`, `Close`, `WithRackSlot`, `WithTSAP` | ✅ | yes | yes (rack/slot options) |
-| Custom dialer (allowlist, proxy, in-memory transport) | `WithDialer`, `WithDiscoverDialer`, `RackSlotProbeRequest.Dialer`, `CompareReadRequest.Dialer` | ✓ `Connect`, `Discover`, `ProbeRackSlots`, `CompareRead` | yes; e2e faults the connect exchange through it; unit tests for each scan helper | no |
+| Custom dialer (allowlist, proxy, in-memory transport) | `WithDialer`, `WithDiscoverDialer`, `RackSlotProbeRequest.Dialer`, `CompareReadRequest.Dialer` | ✓ `Connect`, `Discover`, `ProbeRackSlots`, `CompareRead` | yes; e2e faults the connect exchange and each scan helper through it | no |
 | Reconnect | repeated `Connect`, new client | ✅ | failed attempt only | new client after `Close` (`reconnect-state`) |
 | Byte read, DB | `ReadDB`, `ReadArea` | ✅ | yes | yes |
 | Byte read, markers, inputs, outputs | `ReadMerkers`, `ReadInputs`, `ReadOutputs`, `ReadArea` | ✅ | yes | yes |

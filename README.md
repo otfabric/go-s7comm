@@ -149,6 +149,8 @@ results, err := client.Discover(ctx, "192.168.0.0/24",
 
 Each result reports IP/port reachability, detected rack/slot, negotiated PDU size, and TSAP.
 
+The scan helpers dial with `net.Dialer` unless given a `client.Dialer`: `WithDiscoverDialer` for `Discover`, and the `Dialer` field of `RackSlotProbeRequest` and `CompareReadRequest`. Use it, as `WithDialer` for `Connect`, for an address allowlist, a bound source address or a proxy (SECURITY.md).
+
 ## Rack/Slot Probe
 
 Probe a target for accepted rack/slot combinations:

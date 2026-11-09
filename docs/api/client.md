@@ -61,7 +61,7 @@ Options passed to New are immutable after construction.
 
 #### Discovery and probing (connectionless helpers) {#hdr-Discovery_and_probing__connectionless_helpers_}
 
-Discover, ProbeRackSlots, and CompareRead are connectionless discovery/probe helpers, distinct from connected client operations (ReadArea, WriteArea, etc.). They create one or more TCP connections (Discover and ProbeRackSlots per host or per candidate; CompareRead per candidate). On large networks, use bounded CIDR ranges, timeouts, and parallelism options to avoid excessive connection churn. Safe defaults: limit discovery to /24 or smaller where possible, set WithDiscoverTimeout/WithTimeout, and use moderate Parallelism. SafetyMode (conservative/normal/aggressive), optional jitter, and max attempts per host are supported for ProbeRackSlots and Discover to reduce connection churn on sensitive OT networks.
+Discover, ProbeRackSlots, and CompareRead are connectionless discovery/probe helpers, distinct from connected client operations (ReadArea, WriteArea, etc.). They create one or more TCP connections (Discover and ProbeRackSlots per host or per candidate; CompareRead per candidate). On large networks, use bounded CIDR ranges, timeouts, and parallelism options to avoid excessive connection churn. Safe defaults: limit discovery to /24 or smaller where possible, set WithDiscoverTimeout/WithTimeout, and use moderate Parallelism. SafetyMode (conservative/normal/aggressive), optional jitter, and max attempts per host are supported for ProbeRackSlots and Discover to reduce connection churn on sensitive OT networks. Each helper dials through a Dialer when one is set (WithDiscoverDialer, RackSlotProbeRequest.Dialer, CompareReadRequest.Dialer), as Connect does with WithDialer.
 
 ProbeReadableRanges runs over a single client connection; probes are serialized. RangeProbeRequest.Parallelism is retained for API consistency but does not increase wire-level concurrency—only one probe runs at a time. Do not rely on it for throughput.
 
@@ -368,7 +368,8 @@ type CompareReadRequest struct {
 	DBNumber   int
 	Offset     int
 	Size       int
-	Timeout    time.Duration
+	// Timeout bounds each candidate's connect and, separately, its read. 0 = 5s.
+	Timeout time.Duration
 	// Parallelism limits concurrent connections. Zero or negative is treated as 1 (sequential).
 	// Results remain in candidate order. Aligns with probe/discovery parallelism options.
 	Parallelism int
@@ -399,7 +400,7 @@ CompareReadResult holds one ReadResult per candidate and whether all candidates 
 func CompareRead(ctx context.Context, req CompareReadRequest) (*CompareReadResult, error)
 ```
 
-CompareRead performs the same read for each rack/slot candidate and reports whether results are identical. Use it to test whether a target responds identically across multiple rack/slot candidates. Each candidate uses a new connection (connect, read, close). If Parallelism > 1, up to that many connections run concurrently; results are still in candidate order. If all candidates return ReadStatusSuccess and the returned data is identical, RackSlotInsensitive is set true. Invalid request (negative size/offset/DBNumber for DB) returns an error.
+CompareRead performs the same read for each rack/slot candidate and reports whether results are identical. Use it to test whether a target responds identically across multiple rack/slot candidates. Each candidate uses a new connection (connect, read, close). If Parallelism > 1, up to that many connections run concurrently; results are still in candidate order. If all candidates return ReadStatusSuccess and the returned data is identical, RackSlotInsensitive is set true. Timeout (default 5s) bounds each candidate's connect and, separately, its read, so a peer that goes silent after setup cannot block the call. Invalid request (negative size/offset/DBNumber for DB) returns an error.
 
 ### type Confidence
 
