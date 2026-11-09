@@ -1,5 +1,33 @@
 # go-s7comm Releases
 
+## Unreleased
+
+### Summary
+
+The scan helpers take a `client.Dialer` too, so an allowlist or proxy covers every connection the library opens, not only `Connect`. The defaults are unchanged.
+
+### Added
+
+- `client`: `WithDiscoverDialer` for `Discover`, and a `Dialer` field on `RackSlotProbeRequest` (`ProbeRackSlots`) and `CompareReadRequest` (`CompareRead`). Each attempt's dial goes through it with network `"tcp"`, `host:port` and a context bounded by the helper's timeout; it is called concurrently when the helper runs in parallel. A nil dialer uses `net.Dialer` as before. A dial error is wrapped as `TCP connect: …`: in `RackSlotCandidate.Error` (stage `tcp`, status `unreachable`, or `timeout` on a deadline) and in `ReadResult.Cause` for `CompareRead`; `Discover` counts it as a failed rack/slot attempt. The new fields are tagged `json:"-"`, so results that echo the request still marshal.
+
+### Changed
+
+- `client`: `RackSlotProbeRequest` is no longer comparable with `==`, because it now holds a func field. `CompareReadRequest` already held a slice.
+
+### Tests
+
+- `client/scan_dialer_test.go`: for `Discover`, `ProbeRackSlots` and `CompareRead`, a dialer that redirects to a fake server (the requested `host:port`, a deadline on its context, success through it); a failing dialer (call count per attempt, wrapped error, probe status); a probe timeout through the dialer; a nil discover dialer; JSON marshalling of requests holding a dialer. goleak stays green.
+
+### Documentation
+
+- SECURITY.md "Restricting Destinations", API.md, LIMITATIONS.md, docs/FEATURE-STATUS.md and the `WithDialer` doc comment: the scan helpers no longer dial around the dialer.
+
+### Interoperability
+
+No wire change: the interop matrix runs unchanged with the default dialer.
+
+---
+
 ## v0.13.0
 
 **Date:** 2026-11-09

@@ -254,6 +254,10 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
 - A `Dialer` error is returned wrapped as `TCP connect: …`, so `errors.Is` /
   `errors.As` reach it. With `WithAutoRackSlot`, the final
   `auto rack/slot connect failed …` error wraps the last attempt's error.
+  The scan helpers report it per attempt: `CompareRead` in
+  `ReadResult.Cause`, `ProbeRackSlots` as the text of
+  `RackSlotCandidate.Error` (stage `tcp`); `Discover` counts it as a failed
+  rack/slot attempt.
 - Without cancel **and** without a deadline, open-session TSDU I/O can block
   indefinitely.
 - Rate-limit waits, multi-chunk loops, discover/probe between jobs, and

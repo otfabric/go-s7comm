@@ -220,6 +220,7 @@ type CompareReadRequest struct {
     Size        int
     Timeout     time.Duration
     Parallelism int // concurrent connections; 0 or negative = 1 (sequential); results in candidate order
+    Dialer      Dialer `json:"-"` // opens each candidate's TCP connection; nil = net.Dialer
 }
 
 type CompareReadCandidate struct {
@@ -262,6 +263,7 @@ func WithDiscoverRateLimit(ms int) DiscoverOption
 func WithDiscoverSafetyMode(mode SafetyMode) DiscoverOption
 func WithDiscoverJitter(ms int) DiscoverOption
 func WithDiscoverMaxAttemptsPerHost(n int) DiscoverOption
+func WithDiscoverDialer(d Dialer) DiscoverOption // opens each probe's TCP connection; nil = net.Dialer
 ```
 
 Default discovery settings:
@@ -352,6 +354,7 @@ type RackSlotProbeRequest struct {
     Retries              int              // reserved
     RetryDelay           time.Duration
     StopOnFirstConfirmed bool
+    Dialer               Dialer `json:"-"` // opens each attempt's TCP connection, context bounded by Timeout; nil = net.Dialer
 }
 
 type RackSlotCandidate struct {
@@ -470,7 +473,7 @@ Defaults:
 - max PDU request: 480
 - max AMQ calling/called: 1
 - logger: nil (silent)
-- dialer: nil (`net.Dialer` with the timeout); a custom `Dialer` gets network `"tcp"`, `host:port` and a context carrying the timeout, and returns a non-nil connection exactly when the error is nil. `Discover`, `ProbeRackSlots` and `CompareRead` always dial directly
+- dialer: nil (`net.Dialer` with the timeout); a custom `Dialer` gets network `"tcp"`, `host:port` and a context carrying the timeout, and returns a non-nil connection exactly when the error is nil. The scan helpers have their own dialer: `WithDiscoverDialer`, `RackSlotProbeRequest.Dialer` and `CompareReadRequest.Dialer` (nil = `net.Dialer`)
 
 `Logger` is printf-style and optional; callbacks run synchronously on the request
 path. `NewSlogLogger` adapts `log/slog` without changing the interface.

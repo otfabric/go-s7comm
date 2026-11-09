@@ -134,6 +134,12 @@ type RackSlotProbeRequest struct {
 	RetryDelay time.Duration
 	// StopOnFirstConfirmed: in strict mode, stop after first valid-query (Phase 2; reserved).
 	StopOnFirstConfirmed bool
+
+	// Dialer opens each attempt's TCP connection, as WithDialer does for
+	// Connect. Nil (the default) uses net.Dialer. It is called with a context
+	// bounded by Timeout, and concurrently when Parallelism > 1. It is not
+	// serialized to JSON.
+	Dialer Dialer `json:"-"`
 }
 
 // RackSlotCandidate holds the probe result for a single rack/slot pair.
@@ -442,7 +448,7 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 	c.LocalTSAP = localTSAP
 	c.RemoteTSAP = remoteTSAP
 
-	raw, err := dialTCP(ctx, addr, req.Timeout, nil)
+	raw, err := dialTCP(ctx, addr, req.Timeout, req.Dialer)
 	if err != nil {
 		c.Stage = ProbeStageTCP
 		if isProbeTimeout(err) {

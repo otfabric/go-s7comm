@@ -38,6 +38,7 @@ type discoverOpts struct {
 	safetyMode         SafetyMode
 	jitterMS           int
 	maxAttemptsPerHost int
+	dialer             Dialer
 }
 
 // WithDiscoverTimeout sets per-host timeout in ms
@@ -78,6 +79,14 @@ func WithDiscoverJitter(ms int) DiscoverOption {
 // WithDiscoverMaxAttemptsPerHost caps connection attempts per IP (rack/slot tries). 0 = no limit.
 func WithDiscoverMaxAttemptsPerHost(n int) DiscoverOption {
 	return func(o *discoverOpts) { o.maxAttemptsPerHost = n }
+}
+
+// WithDiscoverDialer sets the function that opens each probe's TCP connection,
+// as WithDialer does for Connect. Nil (the default) uses net.Dialer. It is
+// called with a context bounded by the discover timeout, and concurrently up
+// to the discover parallelism. Dial errors count as a failed rack/slot attempt.
+func WithDiscoverDialer(d Dialer) DiscoverOption {
+	return func(o *discoverOpts) { o.dialer = d }
 }
 
 // Discover scans an IPv4 CIDR range for S7 devices. Only IPv4 CIDRs are supported;
@@ -327,6 +336,7 @@ func probeS7(ctx context.Context, ip string, port int, opts *discoverOpts) Disco
 				WithPort(port),
 				WithRackSlot(rack, slot),
 				WithTimeout(time.Duration(opts.timeout)*time.Millisecond),
+				WithDialer(opts.dialer),
 			)
 
 			if err := c.Connect(ctx); err != nil {

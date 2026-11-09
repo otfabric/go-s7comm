@@ -45,7 +45,7 @@ Package `server` lets anyone who reaches its port read and write all of its memo
 
 ### Restricting Destinations
 
-`WithDialer` sets the function that opens the TCP connection of `Connect`. An application that lets users reach only approved hosts should enforce the allowlist there, for example in a `net.Dialer.Control` hook, which sees the resolved IP right before connecting; checking the host name before `Connect` leaves a DNS-rebinding gap. `Discover`, `ProbeRackSlots` and `CompareRead` do not use a client's dialer: check their targets yourself, or do not expose them.
+`WithDialer` sets the function that opens the TCP connection of `Connect`. An application that lets users reach only approved hosts should enforce the allowlist there, for example in a `net.Dialer.Control` hook, which sees the resolved IP right before connecting; checking the host name before `Connect` leaves a DNS-rebinding gap. The scan helpers take their own dialer: `WithDiscoverDialer` for `Discover`, and the `Dialer` field of `RackSlotProbeRequest` and `CompareReadRequest`. Set the same allowlist on each one you expose; with a nil dialer they dial any target directly.
 
 ### Timeouts
 

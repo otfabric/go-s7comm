@@ -30,6 +30,10 @@ type CompareReadRequest struct {
 	// Parallelism limits concurrent connections. Zero or negative is treated as 1 (sequential).
 	// Results remain in candidate order. Aligns with probe/discovery parallelism options.
 	Parallelism int
+	// Dialer opens each candidate's TCP connection, as WithDialer does for
+	// Connect. Nil (the default) uses net.Dialer. It is called concurrently when
+	// Parallelism > 1. It is not serialized to JSON.
+	Dialer Dialer `json:"-"`
 }
 
 // CompareReadCandidate holds one candidate's read result.
@@ -100,7 +104,7 @@ func CompareRead(ctx context.Context, req CompareReadRequest) (*CompareReadResul
 		cand := cand
 		wg.Go(func() {
 			defer func() { <-sem }()
-			c := New(req.Address, WithPort(port), WithRackSlot(cand.Rack, cand.Slot), WithTimeout(timeout))
+			c := New(req.Address, WithPort(port), WithRackSlot(cand.Rack, cand.Slot), WithTimeout(timeout), WithDialer(req.Dialer))
 			if err := c.Connect(ctx); err != nil {
 				results[idx] = compareCandidateFailure(cand, req.Size, err)
 				_ = c.Close()
