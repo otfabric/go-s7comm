@@ -16,7 +16,7 @@
 // test infrastructure, not a PLC: there is no program, timers and counters
 // do not run, and there is no access protection and no TLS. For every
 // Setup Communication, Read Var and Write Var job recorded from real
-// S7-300 and S7-400 CPUs (testdata/captures) it gives the CPU's answer
+// S7-300, S7-400 and S7-1200 CPUs (testdata/captures) it gives the CPU's answer
 // byte for byte.
 //
 //	srv, err := server.New(server.Config{})

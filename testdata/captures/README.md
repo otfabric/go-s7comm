@@ -1,7 +1,8 @@
 # Recorded S7 traffic of real CPUs
 
-Network captures between real Siemens S7-300 / S7-400 CPUs and several
-clients (Siemens engineering and HMI software, Snap7, libnodave). go-s7comm's
+Network captures between real Siemens S7-300 / S7-400 / S7-1200 CPUs and
+several clients (Siemens engineering and HMI software, Snap7, libnodave,
+python-snap7). go-s7comm's
 tests decode every recorded PDU, replay the CPUs' answers to its client, and
 compare its server's answers with the CPUs'. This is evidence from real
 devices, recorded by others; it is not a test against a live PLC and not a
@@ -12,6 +13,7 @@ conformance claim.
 | Directory | Source | Revision | Terms |
 |---|---|---|---|
 | `gymgit/` | [gymgit/s7-pcaps](https://github.com/gymgit/s7-pcaps) by Gyorgy Miru, 2016 | commit `88f35a601de45fa29b0b36048a30ae4a1e925320` | No licence file. Its README: the pcaps were "created for public use"; addresses were randomised with tcprewrite. [lexab/s7Comm-pcaps](https://github.com/lexab/s7Comm-pcaps) is the same repository (same commit, identical files) and is not copied twice. |
+| `python-snap7/` | [gijzelaerr/python-snap7#976](https://github.com/gijzelaerr/python-snap7/issues/976#issuecomment-6800464989), attachment `Issue976.zip` of a comment by a user with an S7-1200 | posted 2026-11-11, downloaded 2026-11-11 | No licence statement; posted publicly on the issue as an answer to the question of which code a CPU sends for a write to a write-protected DB. |
 | `wireshark/` | [Wireshark wiki, S7Comm](https://wiki.wireshark.org/S7Comm) sample captures (also listed on [SampleCaptures](https://wiki.wireshark.org/SampleCaptures)) | downloaded 2026-11-07 | No licence statement; published as sample captures for the S7comm dissector. |
 
 Left out: `tia_s300_updateFirmware.pcapng` and `tia_s300_updateFirmware_2.pcapng`
@@ -32,6 +34,7 @@ hyphens; the extension keeps the original format (pcap or pcapng).
 | `tia-v13` | TIA Portal V13 |
 | `wincc-advanced` | WinCC Advanced runtime |
 | `libnodave` | libnodave demo programs |
+| `python-snap7` | python-snap7 (pure-Python client), `Client.db_write` |
 | `unknown` | not stated by the source; a PG connection (TSAP 0x0100), most likely STEP 7 |
 
 ## Devices
@@ -45,6 +48,7 @@ holds them.
 | IM151-8 PN/DP CPU (ET 200S, S7-300 class; serial S C-C6TW74882012) | 6ES7 151-8AB01-0AB0 | V3.2.6 | wireshark `unknown_*` |
 | S7-300, model not in the traffic | | | wireshark `libnodave_*` |
 | S7-400, model not in the traffic | | | gymgit `wincc-advanced_s7-400_production` |
+| CPU 1214C DC/DC/DC (S7-1200), DB 1 set write-protected, PUT/GET enabled | not in the traffic | V4.2 | python-snap7 `python-snap7_s7-1200_write-protected-db` (model, firmware and DB setting as the poster states them; the traffic holds only setup and one write) |
 
 ## Files
 
@@ -80,17 +84,18 @@ after recording); none cuts a PDU.
 | `wireshark/unknown_s7-300_read-set-clock.pcap` | `s7comm_reading_setting_plc_time.pcap` | 26 | 0 | Read and set the clock |
 | `wireshark/libnodave_s7-300_read-write-var.pcap` | `s7comm_varservice_libnodavedemo.pcap` | 16 | 0 | libnodave demo: reads and writes of several areas |
 | `wireshark/libnodave_s7-300_benchmark.pcap` | `s7comm_varservice_libnodavedemo_bench.pcap` | 10006 | 0 | libnodave benchmark: 3000 reads, 2002 writes |
+| `python-snap7/python-snap7_s7-1200_write-protected-db.pcapng` | `Issue976.pcapng` | 4 | 0 | python-snap7 `db_write(1, 0, bytearray([0]))`: setup (PDU 240), Write Var of DB1.DBB0 to a write-protected DB; the CPU answers item code 0x03 (object access is not allowed). Recorded from setup on, without the COTP connect |
 
-25 captures, 14,393 S7 PDUs.
+26 captures, 14,397 S7 PDUs.
 
 ## How the tests use them
 
 | Test | Checks |
 |---|---|
 | `internal/capture` `TestCapturesMatchWireshark` | The reader (pcap and pcapng, Ethernet, IPv4, TCP reassembly, TPKT, COTP) finds per file the PDUs Wireshark 4.6.9 decodes |
-| `wire` `TestCaptures*`, `TestDBReadFixturesFromWinCC` | Every PDU decodes; WinCC's 84 DBREAD requests to the S7-400 parse, three of them as byte-exact fixtures; Read Var, Write Var and Setup Communication decode both ways, and every successful item has the requested length; every user data request of the five clients has the parameter layout `wire` encodes; the encoders produce requests the real clients sent, byte for byte; the CPU's item code 0x03 for a refused write |
+| `wire` `TestCaptures*`, `TestDBReadFixturesFromWinCC` | Every PDU decodes; WinCC's 84 DBREAD requests to the S7-400 parse, three of them as byte-exact fixtures; Read Var, Write Var and Setup Communication decode both ways, and every successful item has the requested length; every user data request of the five clients has the parameter layout `wire` encodes; the encoders produce requests the real clients sent, byte for byte; the CPU 315-2 PN/DP's item code 0x03 for a refused timer and counter write, the S7-1200's 0x03 for a write to a write-protected DB |
 | `client` `TestCaptureReplay*` | The client runs against the recorded answers; a request no real client sent finds no answer and fails the test. Identify, CPU state, protection, diagnostic buffer, block counts, lists and info, and SDB 0 upload give the values in Snap7's log and Wireshark's decode |
-| `server` `TestCaptureReplayMatchesRealCPUs` | Every recorded Setup Communication, Read Var and Write Var job, sent to `server` holding the same memory, gets the CPU's answer byte for byte: 26 setups, 3,411 reads (timers, counters and DBREAD included), 2,081 writes |
+| `server` `TestCaptureReplayMatchesRealCPUs` | Every recorded Setup Communication, Read Var and Write Var job, sent to `server` holding the same memory, gets the CPU's answer byte for byte: 27 setups, 3,411 reads (timers, counters and DBREAD included), 2,082 writes (a DB whose write the CPU refused with 0x03 is registered read-only) |
 
 Adding a capture: copy it here under the naming scheme, add its line to
 SHA256SUMS and to the tables above, and its expected counts to

@@ -28,11 +28,11 @@ CI runs on Linux only. See [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md#platf
 
 ## Recorded traffic of real CPUs
 
-[testdata/captures](testdata/captures/README.md) holds 25 captures (14,393 S7 PDUs) between real S7-300/S7-400 CPUs and Snap7, STEP 7 5.5, TIA Portal V13, WinCC Advanced and libnodave, with their sources, devices and checksums. `internal/capture` reads them (pcap and pcapng, TCP reassembly, TPKT and COTP); its counts per file equal Wireshark 4.6.9's.
+[testdata/captures](testdata/captures/README.md) holds 26 captures (14,397 S7 PDUs) between real S7-300/S7-400/S7-1200 CPUs and Snap7, STEP 7 5.5, TIA Portal V13, WinCC Advanced, libnodave and python-snap7, with their sources, devices and checksums. `internal/capture` reads them (pcap and pcapng, TCP reassembly, TPKT and COTP); its counts per file equal Wireshark 4.6.9's.
 
 - `wire`: every PDU decodes; every Read Var, Write Var and Setup Communication decodes both ways, every successful item has the requested length, and every user data request has the parameter layout the encoders produce. `TestCapturesEncodersMatchRecordedRequests` checks that the encoders produce, byte for byte, requests the real clients sent.
 - `client`: `TestCaptureReplay*` replays a capture as a server. A request is answered only if a real client sent the same bytes, so a request built differently fails the test. The results (Identify, CPU state, protection, diagnostic buffer, block counts, lists and info, an SDB upload) are compared with Snap7's log of the session and Wireshark's decode.
-- `server`: `TestCaptureReplayMatchesRealCPUs` sends every recorded Setup Communication, Read Var and Write Var job to a server holding the memory the CPU reported, and compares the answers byte for byte; all are identical. `wire` parses WinCC's 84 DBREAD requests to the S7-400, and three of them are parser fixtures and fuzz seeds.
+- `server`: `TestCaptureReplayMatchesRealCPUs` sends every recorded Setup Communication, Read Var and Write Var job to a server holding the memory the CPU reported (read-only where the CPU refused a write to a DB with `0x03`), and compares the answers byte for byte; all are identical. `wire` parses WinCC's 84 DBREAD requests to the S7-400, and three of them are parser fixtures and fuzz seeds.
 
 ## Goroutine leaks
 

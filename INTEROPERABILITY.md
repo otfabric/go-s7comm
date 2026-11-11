@@ -44,19 +44,19 @@ Recorded: `Interop` workflow run for commit `436a28f` on `main`, and a local `ma
 
 ## Recorded traffic of real CPUs
 
-[testdata/captures](testdata/captures/README.md): 25 captures between a CPU 315-2 PN/DP (6ES7 315-2EH14-0AB0, V3.2.7), an IM151-8 PN/DP CPU (6ES7 151-8AB01-0AB0, V3.2.6), an S7-400 and another S7-300, and five clients (Snap7, STEP 7 5.5, TIA Portal V13, WinCC Advanced, libnodave). These are real devices, recorded by others, and replayed; no live PLC is involved ([TESTING.md](TESTING.md#recorded-traffic-of-real-cpus)).
+[testdata/captures](testdata/captures/README.md): 26 captures between a CPU 315-2 PN/DP (6ES7 315-2EH14-0AB0, V3.2.7), an IM151-8 PN/DP CPU (6ES7 151-8AB01-0AB0, V3.2.6), an S7-400, another S7-300 and a CPU 1214C DC/DC/DC (S7-1200, V4.2), and six clients (Snap7, STEP 7 5.5, TIA Portal V13, WinCC Advanced, libnodave, python-snap7). These are real devices, recorded by others, and replayed; no live PLC is involved ([TESTING.md](TESTING.md#recorded-traffic-of-real-cpus)).
 
 | What | Result |
 |---|---|
-| Every S7 PDU (14,393) | decodes; counts per file equal Wireshark 4.6.9 |
+| Every S7 PDU (14,397) | decodes; counts per file equal Wireshark 4.6.9 |
 | Read Var answers of the CPUs (9,068 items) | every successful S7ANY item has the requested length (BIT, BYTE, INT in bits; DINT, REAL, OCTET STRING in bytes) |
 | DBREAD requests of WinCC to the S7-400 (84: 43 one-range, 1 two-range, 40 three-range) | all parse (`wire.ParseReadVarDBRead`); every answer holds per range the return code and the requested bytes |
 | Requests the encoders build | byte for byte the requests of Snap7, TIA Portal and libnodave: setup, Read Var, SZL, SZL follow-up, block count, list and info, start upload, upload, end upload |
 | Client against the CPU 315-2 PN/DP's recorded answers | `Identify`, `GetCPUState`, `BlockCounts`, `UploadBlock` (SDB 0) give the values Snap7 logged in the same session; `ListBlocks` (SFC in two packets), `GetBlockInfo`, `GetProtectionLevel`, `ReadDiagBuffer` give the values Wireshark decodes |
 | Client against the IM151-8 PN/DP CPU's recorded answers | `Identify`, `GetCPUState`, `ReadDiagBuffer`, `BlockCounts`, `ListBlocks` |
-| Server, every recorded Setup Communication, Read Var and Write Var job | the CPU's answer byte for byte, every one: 26 setups (AmQ as granted), 3,411 reads (including 86 of timers and counters and 84 DBREAD jobs of the S7-400), 2,081 writes (including the refused timer and counter write) |
+| Server, every recorded Setup Communication, Read Var and Write Var job | the CPU's answer byte for byte, every one: 27 setups (AmQ as granted), 3,411 reads (including 86 of timers and counters and 84 DBREAD jobs of the S7-400), 2,082 writes (including the refused timer and counter write and the S7-1200's refused write to a write-protected DB) |
 
-A CPU 315-2 PN/DP refuses a write to its timers and counters with item code `0x03` (object access is not allowed) while it reads them; it answers `0x0A` for a DB that does not exist ([ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors)).
+A CPU 315-2 PN/DP refuses a write to its timers and counters with item code `0x03` (object access is not allowed) while it reads them; it answers `0x0A` for a DB that does not exist. A CPU 1214C (S7-1200, V4.2) refuses a write to a write-protected DB with `0x03` too, the code package `server` sends for a read-only DB ([ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors)).
 
 ## Not covered
 
@@ -66,7 +66,7 @@ No independent peer and no recorded traffic covers these; they are tested only a
 
 ## Our own server (not a peer)
 
-snap7-interop publishes go-s7comm's own `server` package behind the same contract as `ghcr.io/otfabric/snap7-interop-otfabric` (adapter `otfabric`, `independentEngine: false`), built from the latest go-s7comm release. The manual **Self-interop** workflow runs this repository's client against its `:latest` and logs the digest. A pass there shows that the client and a released server of this library agree on the wire; it is not independent verification and adds nothing to the results above. One fixture step differs on purpose: the server answers a write to a read-only area with `0x03` (write-protected, the Siemens code), where both peers send `0x0A`. snap7-interop classifies it as an intentional difference ([COMPATIBILITY.md](https://github.com/otfabric/snap7-interop/blob/main/docs/COMPATIBILITY.md#write-to-a-read-only-area-0x03-and-0x0a)); the codes are compared in [ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors).
+snap7-interop publishes go-s7comm's own `server` package behind the same contract as `ghcr.io/otfabric/snap7-interop-otfabric` (adapter `otfabric`, `independentEngine: false`), built from the latest go-s7comm release. The manual **Self-interop** workflow runs this repository's client against its `:latest` and logs the digest. A pass there shows that the client and a released server of this library agree on the wire; it is not independent verification and adds nothing to the results above. One fixture step differs on purpose: the server answers a write to a read-only area with `0x03` (write-protected, the Siemens code, and what a recorded S7-1200 sends), where both peers send `0x0A`. snap7-interop classifies it as an intentional difference ([COMPATIBILITY.md](https://github.com/otfabric/snap7-interop/blob/main/docs/COMPATIBILITY.md#write-to-a-read-only-area-0x03-and-0x0a)); the codes are compared in [ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors).
 
 Last run, 2026-11-07: Self-interop ([run 42349307896](https://github.com/otfabric/go-s7comm/actions/runs/42349307896)), this repository's client at v0.12.0 against `snap7-interop-otfabric:v0.12.0` (`sha256:3a5e98b34f6fcdfa767b5badcc9b46aad4efdb565e72324045e643888f929eaf`), all 15 fixtures passed, with that known difference. snap7-interop's Own stack run of the same image ([run 42349157492](https://github.com/otfabric/snap7-interop/actions/runs/42349157492), harness v0.6.1): 14 pass and 1 known difference against each reference.
 
