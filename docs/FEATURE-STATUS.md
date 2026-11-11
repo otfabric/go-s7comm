@@ -39,7 +39,7 @@ The module is pure Go; go-cotp and go-tpkt are its only dependencies, apart from
 | Byte read, markers, inputs, outputs | `ReadMerkers`, `ReadInputs`, `ReadOutputs`, `ReadArea` | ✅ | yes | yes |
 | Byte write, DB, markers | `WriteDB`, `WriteArea` | ✅ | yes | yes |
 | Bit read and write | `ReadBit`, `WriteBit`, `ReadDBBit`, `WriteDBBit` | ✅ | yes | yes, on DBs (`ReadBit`, `WriteBit`) |
-| Rejected read and write | `ReadResult.Status`, `S7Error`, `ParseWriteVarResponse` | ✅ | yes | yes, item codes `0x05` and `0x0A`; recorded: `0x03` and `0x0A` of a CPU 315-2 PN/DP ([ERRORS.md](../ERRORS.md#refused-access-item-codes-and-header-errors)) |
+| Rejected read and write | `ReadResult.Status`, `S7Error`, `ParseWriteVarResponse` | ✅ | yes | yes, item codes `0x05` and `0x0A`; recorded: `0x03` and `0x0A` of a CPU 315-2 PN/DP, `0x03` of a CPU 1214C for a write-protected DB ([ERRORS.md](../ERRORS.md#refused-access-item-codes-and-header-errors)) |
 | Multi-PDU read and write chunking | `ReadArea`, `WriteArea` | ✅ | chunk planning unit test only | no |
 | Timer and counter areas | `model.AreaTimer`, `model.AreaCounter` | ◐ area codes defined; no client test uses them | no | no |
 | CPU identification | `Identify` | ✅ | yes | recorded: CPU 315-2 PN/DP, IM151-8 PN/DP CPU |
@@ -52,7 +52,7 @@ The module is pure Go; go-cotp and go-tpkt are its only dependencies, apart from
 | Rack/slot probe | `ProbeRackSlots` | ✅ | yes | no |
 | Discovery | `Discover` | ◐ IPv4 only, up to `/12` | validation, CIDR handling and cancellation only | no |
 | Block download, PLC start and stop | — | — | n/a | n/a |
-| Test server: setup, Read Var, Write Var on DB, I, Q, M, T, C; DBREAD | `server.New`, `RegisterDB`, `RegisterArea`, `Serve` | ◐ for tests; no SZL, blocks; timers and counters do not run | this module's client (`server/`); every recorded job of real CPUs, byte for byte | snap7-interop's probe, all 15 fixtures in its Own stack workflow, the read-only code `0x03` an intentional difference from the Snap7 references' `0x0A` ([LIMITATIONS.md](../LIMITATIONS.md#verification)) |
+| Test server: setup, Read Var, Write Var on DB, I, Q, M, T, C; DBREAD | `server.New`, `RegisterDB`, `RegisterArea`, `Serve` | ◐ for tests; no SZL, blocks; timers and counters do not run | this module's client (`server/`); every recorded job of real CPUs, byte for byte | snap7-interop's probe, all 15 fixtures in its Own stack workflow, the read-only code `0x03` (as a recorded S7-1200 sends it) an intentional difference from the Snap7 references' `0x0A` ([LIMITATIONS.md](../LIMITATIONS.md#verification)) |
 | TLS, password handling | — | — | n/a | n/a |
 
 Wire decoders in `wire/` have fuzz targets; see [TESTING.md](../TESTING.md#fuzzing).

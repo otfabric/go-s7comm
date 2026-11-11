@@ -18,7 +18,8 @@ import (
 // recorded in testdata/captures as the real S7-300/S7-400 CPU did, byte
 // for byte: S7ANY items on DBs, inputs, outputs, markers, timers and
 // counters, the S7-400's DBREAD items, the refused timer and counter
-// writes (0x03), and the parallel jobs (AmQ) granted. The memory is seeded
+// writes (0x03), the S7-1200's refused write to a write-protected DB
+// (0x03), and the parallel jobs (AmQ) granted. The memory is seeded
 // with what the CPU answered before each read.
 
 func elemBytes(ts byte) int {
@@ -115,7 +116,8 @@ func itemCodes(resp []byte) []byte {
 }
 
 // replayServer builds a server holding every area the CPU answered
-// successfully, as large as the furthest byte addressed.
+// successfully, as large as the furthest byte addressed, and every DB whose
+// write the CPU refused with 0x03 as a read-only DB.
 func replayServer(t *testing.T, xs []exchange) *session {
 	t.Helper()
 	type key struct {
@@ -123,6 +125,7 @@ func replayServer(t *testing.T, xs []exchange) *session {
 		db   uint16
 	}
 	size := map[key]int{}
+	readOnly := map[key]bool{}
 	pdu := MinPDUSize
 	for _, x := range xs {
 		p, _ := sections(x.r)
@@ -136,6 +139,12 @@ func replayServer(t *testing.T, xs []exchange) *session {
 			ranges, _ = wire.ParseReadVarDBRead(q)
 		}
 		for i, s := range specsOf(x.q) {
+			if i < len(codes) && codes[i] == wire.RetCodeAccessFault && s.Area == wire.AreaDB && s.Syntax == wire.SyntaxIDS7Any {
+				k := key{wire.AreaDB, s.DBNumber}
+				start, n := span(s)
+				size[k], readOnly[k] = max(size[k], start+n), true
+				continue
+			}
 			if i >= len(codes) || codes[i] != wire.RetCodeSuccess {
 				continue
 			}
@@ -161,7 +170,7 @@ func replayServer(t *testing.T, xs []exchange) *session {
 	}
 	for k, n := range size {
 		if k.area == wire.AreaDB {
-			err = srv.RegisterDB(int(k.db), make([]byte, n), AreaOptions{})
+			err = srv.RegisterDB(int(k.db), make([]byte, n), AreaOptions{ReadOnly: readOnly[k]})
 		} else {
 			err = srv.RegisterArea(Area(k.area), make([]byte, n), AreaOptions{})
 		}
@@ -221,7 +230,7 @@ func seed(t *testing.T, srv *Server, x exchange) {
 
 func TestCaptureReplayMatchesRealCPUs(t *testing.T) {
 	files, err := filepath.Glob("../testdata/captures/*/*.pcap*")
-	if err != nil || len(files) != 25 {
+	if err != nil || len(files) != 26 {
 		t.Fatalf("captures: %d, %v", len(files), err)
 	}
 	byKind := map[byte]int{}
@@ -254,7 +263,7 @@ func TestCaptureReplayMatchesRealCPUs(t *testing.T) {
 		}
 	}
 	t.Logf("identical answers: setup %d, read %d, write %d", byKind[wire.FuncSetupComm], byKind[wire.FuncReadVar], byKind[wire.FuncWriteVar])
-	if byKind[wire.FuncSetupComm] != 26 || byKind[wire.FuncReadVar] != 3411 || byKind[wire.FuncWriteVar] != 2081 {
-		t.Fatalf("identical answers %v, want setup 26, read 3411, write 2081", byKind)
+	if byKind[wire.FuncSetupComm] != 27 || byKind[wire.FuncReadVar] != 3411 || byKind[wire.FuncWriteVar] != 2082 {
+		t.Fatalf("identical answers %v, want setup 27, read 3411, write 2082", byKind)
 	}
 }

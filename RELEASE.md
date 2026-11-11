@@ -1,5 +1,27 @@
 # go-s7comm Releases
 
+## v0.15.1
+
+**Date:** 2026-11-11
+**Previous release:** v0.15.0
+
+### Summary
+
+Recorded evidence for the code a real CPU sends for a write to a write-protected DB: a CPU 1214C DC/DC/DC (S7-1200, firmware V4.2) answers item code `0x03` (object access is not allowed), the code package `server` already sends for a read-only DB, and not the `0x0A` of Snap7-based servers. No code change.
+
+### Tests
+
+- `testdata/captures/python-snap7/python-snap7_s7-1200_write-protected-db.pcapng`, from [python-snap7#976](https://github.com/gijzelaerr/python-snap7/issues/976#issuecomment-6800464989) (byte-identical, in SHA256SUMS): setup and one Write Var of DB1.DBB0 to a write-protected DB with PUT/GET enabled.
+- `wire` `TestCapturesWriteProtectedDBIsAccessDenied`: the request is DB1.DBB0 = 00, the answer has no header error and item code `0x03`, and `ParseWriteVarResponse` returns an `S7Error` with code `0x03`.
+- `server` `TestCaptureReplayMatchesRealCPUs` registers a DB whose write the CPU refused with `0x03` as read-only and gets the S7-1200's answer byte for byte (27 setups, 3,411 reads, 2,082 writes); with the DB writable it fails.
+- `internal/capture` and `wire` counts: 26 captures, 14,397 PDUs, equal to Wireshark 4.6.9.
+
+### Documentation
+
+- ERRORS.md (*Refused access*), INTEROPERABILITY.md, docs/FEATURE-STATUS.md, TESTING.md, testdata/captures/README.md and the `AreaOptions.ReadOnly` comment cite the S7-1200 capture; the gap "no capture holds a write to a write-protected DB" is closed for the S7-1200.
+
+---
+
 ## v0.15.0
 
 **Date:** 2026-11-09

@@ -16,31 +16,32 @@ import (
 // leave out; none of them cuts a PDU.
 func TestCapturesMatchWireshark(t *testing.T) {
 	want := map[string]struct{ pdus, convs, cr, gaps int }{
-		"libnodave_s7-300_benchmark.pcap":               {10006, 3, 1, 0},
-		"libnodave_s7-300_read-write-var.pcap":          {16, 2, 1, 0},
-		"snap7_s7-300_client-demo.pcapng":               {64, 1, 0, 0},
-		"snap7_s7-300_plc-stop.pcapng":                  {2, 1, 0, 0},
-		"snap7_s7-300_read-var.pcapng":                  {2, 1, 0, 0},
-		"snap7_s7-300_setup-communication.pcapng":       {2, 1, 0, 0},
-		"step7-v5.5_s7-300_auth-password.pcapng":        {6, 1, 0, 2},
-		"step7-v5.5_s7-300_copy-ram-to-rom.pcapng":      {2, 1, 0, 0},
-		"step7-v5.5_s7-300_download-blocks.pcapng":      {96, 1, 0, 59},
-		"step7-v5.5_s7-300_plc-stop.pcapng":             {4, 1, 0, 0},
-		"step7-v5.5_s7-300_read-diag-data.pcapng":       {410, 1, 0, 0},
-		"step7-v5.5_s7-300_read-var-table.pcapng":       {331, 1, 0, 0},
-		"step7-v5.5_s7-300_read-write-var-table.pcapng": {16, 1, 0, 0},
-		"tia-v13_s7-300_download-hw-config.pcapng":      {154, 6, 0, 90},
-		"tia-v13_s7-300_download-ob1.pcapng":            {106, 1, 0, 74},
-		"tia-v13_s7-300_flash-led.pcapng":               {4, 1, 0, 1},
-		"tia-v13_s7-300_go-online.pcapng":               {448, 1, 0, 223},
-		"unknown_s7-300_download-db1.pcap":              {48, 4, 3, 0},
-		"unknown_s7-300_list-blocks.pcap":               {70, 6, 5, 0},
-		"unknown_s7-300_read-plc-status.pcap":           {144, 3, 1, 0},
-		"unknown_s7-300_read-set-clock.pcap":            {26, 2, 1, 0},
-		"wincc-advanced_s7-300_alarm-read-1.pcapng":     {128, 1, 0, 41},
-		"wincc-advanced_s7-300_alarm-read-2.pcapng":     {486, 1, 0, 235},
-		"wincc-advanced_s7-300_alarm-read-write.pcapng": {164, 1, 0, 79},
-		"wincc-advanced_s7-400_production.pcapng":       {1658, 1, 0, 423},
+		"libnodave_s7-300_benchmark.pcap":                {10006, 3, 1, 0},
+		"libnodave_s7-300_read-write-var.pcap":           {16, 2, 1, 0},
+		"python-snap7_s7-1200_write-protected-db.pcapng": {4, 1, 0, 0},
+		"snap7_s7-300_client-demo.pcapng":                {64, 1, 0, 0},
+		"snap7_s7-300_plc-stop.pcapng":                   {2, 1, 0, 0},
+		"snap7_s7-300_read-var.pcapng":                   {2, 1, 0, 0},
+		"snap7_s7-300_setup-communication.pcapng":        {2, 1, 0, 0},
+		"step7-v5.5_s7-300_auth-password.pcapng":         {6, 1, 0, 2},
+		"step7-v5.5_s7-300_copy-ram-to-rom.pcapng":       {2, 1, 0, 0},
+		"step7-v5.5_s7-300_download-blocks.pcapng":       {96, 1, 0, 59},
+		"step7-v5.5_s7-300_plc-stop.pcapng":              {4, 1, 0, 0},
+		"step7-v5.5_s7-300_read-diag-data.pcapng":        {410, 1, 0, 0},
+		"step7-v5.5_s7-300_read-var-table.pcapng":        {331, 1, 0, 0},
+		"step7-v5.5_s7-300_read-write-var-table.pcapng":  {16, 1, 0, 0},
+		"tia-v13_s7-300_download-hw-config.pcapng":       {154, 6, 0, 90},
+		"tia-v13_s7-300_download-ob1.pcapng":             {106, 1, 0, 74},
+		"tia-v13_s7-300_flash-led.pcapng":                {4, 1, 0, 1},
+		"tia-v13_s7-300_go-online.pcapng":                {448, 1, 0, 223},
+		"unknown_s7-300_download-db1.pcap":               {48, 4, 3, 0},
+		"unknown_s7-300_list-blocks.pcap":                {70, 6, 5, 0},
+		"unknown_s7-300_read-plc-status.pcap":            {144, 3, 1, 0},
+		"unknown_s7-300_read-set-clock.pcap":             {26, 2, 1, 0},
+		"wincc-advanced_s7-300_alarm-read-1.pcapng":      {128, 1, 0, 41},
+		"wincc-advanced_s7-300_alarm-read-2.pcapng":      {486, 1, 0, 235},
+		"wincc-advanced_s7-300_alarm-read-write.pcapng":  {164, 1, 0, 79},
+		"wincc-advanced_s7-400_production.pcapng":        {1658, 1, 0, 423},
 	}
 	files, err := filepath.Glob("../../testdata/captures/*/*.pcap*")
 	if err != nil || len(files) != len(want) {
@@ -67,8 +68,8 @@ func TestCapturesMatchWireshark(t *testing.T) {
 				filepath.Base(f), n, len(convs), cr, cc, gaps, dropped, w)
 		}
 	}
-	if total != 14393 {
-		t.Fatalf("%d PDUs in all, want 14393", total)
+	if total != 14397 {
+		t.Fatalf("%d PDUs in all, want 14397", total)
 	}
 }
 

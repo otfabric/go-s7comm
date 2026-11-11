@@ -775,7 +775,7 @@ type Area byte // AreaInputs, AreaOutputs, AreaMerkers, AreaDB, AreaTimers, Area
 // Errors: ErrServerClosed, ErrUnknownArea, ErrAreaExists, ErrOutOfRange (see ERRORS.md)
 ```
 
-Protocol behaviour follows the codes Siemens defines, as Wireshark's s7comm dissector (`packet-s7comm.c`) lists them, and not the quirks of one implementation. For every Setup Communication, Read Var and Write Var job recorded from real S7-300 and S7-400 CPUs in [testdata/captures](testdata/captures/README.md) it gives the CPU's answer byte for byte (`server/capture_test.go`):
+Protocol behaviour follows the codes Siemens defines, as Wireshark's s7comm dissector (`packet-s7comm.c`) lists them, and not the quirks of one implementation. For every Setup Communication, Read Var and Write Var job recorded from real S7-300, S7-400 and S7-1200 CPUs in [testdata/captures](testdata/captures/README.md) it gives the CPU's answer byte for byte (`server/capture_test.go`):
 
 | Request | Answer |
 |---|---|

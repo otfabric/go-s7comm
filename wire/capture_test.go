@@ -12,15 +12,15 @@ import (
 	"github.com/otfabric/go-s7comm/internal/capture"
 )
 
-// The tests in this file decode the recorded traffic of real S7-300 and
-// S7-400 CPUs in testdata/captures (testdata/captures/README.md lists every
+// The tests in this file decode the recorded traffic of real S7-300,
+// S7-400 and S7-1200 CPUs in testdata/captures (testdata/captures/README.md lists every
 // file, device and client).
 
 func captureFiles(t *testing.T) []string {
 	t.Helper()
 	files, err := filepath.Glob("../testdata/captures/*/*.pcap*")
-	if err != nil || len(files) != 25 {
-		t.Fatalf("captures: %d files, %v; want 25", len(files), err)
+	if err != nil || len(files) != 26 {
+		t.Fatalf("captures: %d files, %v; want 26", len(files), err)
 	}
 	return files
 }
@@ -100,8 +100,8 @@ func TestCapturesEveryPDUDecodes(t *testing.T) {
 			}
 		}
 	}
-	if total != 14393 {
-		t.Fatalf("%d PDUs, want 14393 (Wireshark 4.6.9)", total)
+	if total != 14397 {
+		t.Fatalf("%d PDUs, want 14397 (Wireshark 4.6.9)", total)
 	}
 }
 
@@ -117,22 +117,23 @@ type varStats struct{ setups, reads, readItems, writes, writeItems int }
 // and ParseWriteVarResponse fails exactly when an item was refused.
 func TestCapturesVariableServices(t *testing.T) {
 	want := map[string]varStats{
-		"snap7_s7-300_client-demo.pcapng":               {1, 2, 6, 2, 6},
-		"snap7_s7-300_read-var.pcapng":                  {0, 1, 1, 0, 0},
-		"snap7_s7-300_setup-communication.pcapng":       {1, 0, 0, 0, 0},
-		"step7-v5.5_s7-300_download-blocks.pcapng":      {1, 0, 0, 0, 0},
-		"tia-v13_s7-300_download-hw-config.pcapng":      {6, 0, 0, 0, 0},
-		"tia-v13_s7-300_go-online.pcapng":               {1, 0, 0, 0, 0},
-		"wincc-advanced_s7-300_alarm-read-1.pcapng":     {1, 55, 645, 2, 2},
-		"wincc-advanced_s7-300_alarm-read-2.pcapng":     {1, 228, 1029, 8, 8},
-		"wincc-advanced_s7-300_alarm-read-write.pcapng": {1, 38, 304, 36, 36},
-		"wincc-advanced_s7-400_production.pcapng":       {1, 84, 84, 27, 27},
-		"libnodave_s7-300_benchmark.pcap":               {1, 3000, 6996, 2002, 2002},
-		"libnodave_s7-300_read-write-var.pcap":          {1, 3, 3, 4, 4},
-		"unknown_s7-300_download-db1.pcap":              {3, 0, 0, 0, 0},
-		"unknown_s7-300_list-blocks.pcap":               {5, 0, 0, 0, 0},
-		"unknown_s7-300_read-plc-status.pcap":           {1, 0, 0, 0, 0},
-		"unknown_s7-300_read-set-clock.pcap":            {1, 0, 0, 0, 0},
+		"snap7_s7-300_client-demo.pcapng":                {1, 2, 6, 2, 6},
+		"snap7_s7-300_read-var.pcapng":                   {0, 1, 1, 0, 0},
+		"snap7_s7-300_setup-communication.pcapng":        {1, 0, 0, 0, 0},
+		"step7-v5.5_s7-300_download-blocks.pcapng":       {1, 0, 0, 0, 0},
+		"tia-v13_s7-300_download-hw-config.pcapng":       {6, 0, 0, 0, 0},
+		"tia-v13_s7-300_go-online.pcapng":                {1, 0, 0, 0, 0},
+		"wincc-advanced_s7-300_alarm-read-1.pcapng":      {1, 55, 645, 2, 2},
+		"wincc-advanced_s7-300_alarm-read-2.pcapng":      {1, 228, 1029, 8, 8},
+		"wincc-advanced_s7-300_alarm-read-write.pcapng":  {1, 38, 304, 36, 36},
+		"wincc-advanced_s7-400_production.pcapng":        {1, 84, 84, 27, 27},
+		"libnodave_s7-300_benchmark.pcap":                {1, 3000, 6996, 2002, 2002},
+		"libnodave_s7-300_read-write-var.pcap":           {1, 3, 3, 4, 4},
+		"python-snap7_s7-1200_write-protected-db.pcapng": {1, 0, 0, 1, 1},
+		"unknown_s7-300_download-db1.pcap":               {3, 0, 0, 0, 0},
+		"unknown_s7-300_list-blocks.pcap":                {5, 0, 0, 0, 0},
+		"unknown_s7-300_read-plc-status.pcap":            {1, 0, 0, 0, 0},
+		"unknown_s7-300_read-set-clock.pcap":             {1, 0, 0, 0, 0},
 	}
 	for _, f := range captureFiles(t) {
 		name := filepath.Base(f)
@@ -239,6 +240,35 @@ func TestCapturesRefusedWriteIsAccessDenied(t *testing.T) {
 	}
 	if !bytes.Equal(codes, []byte{0xFF, 0xFF, 0xFF, 0x03, 0x03}) || !bytes.Equal(readCodes, []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF}) {
 		t.Fatalf("write codes % x, read codes % x", codes, readCodes)
+	}
+}
+
+// A CPU 1214C DC/DC/DC (S7-1200, firmware V4.2) with DB 1 write-protected
+// and PUT/GET enabled answers a python-snap7 write of one byte to DB1.DBB0
+// with item code 0x03, "object access is not allowed": the code for a
+// write-protected DB is 0x03, not 0x0A (the object exists).
+func TestCapturesWriteProtectedDBIsAccessDenied(t *testing.T) {
+	convs := readCapture(t, "../testdata/captures/python-snap7/python-snap7_s7-1200_write-protected-db.pcapng")
+	pairs := jobPairs(convs[0])
+	if len(convs) != 1 || len(pairs) != 2 {
+		t.Fatalf("%d conversations, %d jobs; want 1 and 2", len(convs), len(pairs))
+	}
+	_, qp, qd := splitPDU(t, pairs[1].req.Data)
+	specs, data, err := ParseWriteVarRequest(qp, qd)
+	if err != nil || len(specs) != 1 {
+		t.Fatalf("write request: %d items, %v", len(specs), err)
+	}
+	if s := specs[0]; s.Area != AreaDB || s.DBNumber != 1 || s.StartBit != 0 || s.Count != 1 || !bytes.Equal(data[0].Data, []byte{0}) {
+		t.Fatalf("write %+v of % x, want DB1.DBB0 = 00", s, data[0].Data)
+	}
+	h, rp, rd := splitPDU(t, pairs[1].resp.Data)
+	codes, err := ParseWriteVarResponseCodes(rp, rd)
+	if err != nil || h.ErrorClass != 0 || h.ErrorCode != 0 || !bytes.Equal(codes, []byte{RetCodeAccessFault}) {
+		t.Fatalf("answer: header %02x%02x, codes % x, %v; want item code 03", h.ErrorClass, h.ErrorCode, codes, err)
+	}
+	var s7Err *S7Error
+	if err := ParseWriteVarResponse(rp, rd); !errors.As(err, &s7Err) || s7Err.Code != RetCodeAccessFault {
+		t.Fatalf("ParseWriteVarResponse = %v, want access denied", err)
 	}
 }
 
