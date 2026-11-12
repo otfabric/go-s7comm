@@ -18,7 +18,7 @@ The library provides:
 - SZL-based identification and diagnostics helpers
 - Block listing, block metadata retrieval, and block upload
 - Low-level wire parsing/encoding packages for protocol internals
-- An in-memory S7 server for tests (`server`): Setup Communication, Read Var and Write Var on DBs, inputs, outputs and markers, with the codes Siemens defines for them
+- An in-memory S7 server for tests (`server`): Setup Communication, Read Var and Write Var on DBs, inputs, outputs and markers, Read Var of timers and counters (writes refused with `0x03`) and of the S7-400's DBREAD items, with the codes Siemens defines for them
 
 **Docs:** [API.md](API.md) (public API) · [ERRORS.md](ERRORS.md) (error and result semantics) · [OBSERVABILITY.md](OBSERVABILITY.md) (logging) · [ARCHITECTURE.md](ARCHITECTURE.md) (layers, concurrency) · [TESTING.md](TESTING.md) (test tiers) · [INTEROPERABILITY.md](INTEROPERABILITY.md) (peers, results) · [Feature status](docs/FEATURE-STATUS.md) · [LIMITATIONS.md](LIMITATIONS.md) · [RELEASE.md](RELEASE.md) (changelog)
 
