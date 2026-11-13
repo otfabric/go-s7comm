@@ -8,7 +8,7 @@
 | End-to-end | `make e2e` | none; also part of `make test` | `ci.yml` (go-ci) |
 | Coverage gate | `make coverage-check` | none | `ci.yml` (go-ci `coverage-min`) |
 | Per-package coverage floor | `make coverage-pkg-check` | none | `ci.yml` (`Per-package coverage`) |
-| Fuzz | `make fuzz` (`FUZZTIME`, default 10s per target) | none | `ci.yml` (go-ci `fuzz-time: 10s`); `extended.yml`, nightly, 5 minutes per target |
+| Fuzz | `make fuzz` (`FUZZTIME`, default 10s per target) | none | `ci.yml` (go-ci `fuzz-time: 10s`); `extended.yml`, nightly, 5 minutes per target, one job per target |
 | Benchmarks | `make bench` | none | not run |
 | Cross-compilation | `make cross` | none | not run |
 | Interoperability | `make interop` | Docker, ports 1102 and 2102 free | `interop.yml`, every push and pull request |

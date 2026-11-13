@@ -2,6 +2,8 @@ name: Extended
 run-name: "Extended (${{ github.event_name }}) on ${{ github.ref_name }}"
 
 # What is too long for every push: each fuzz target for minutes, not seconds.
+# One job per target, so the time per target sets each job's length and a new
+# target never pushes the run past a job timeout.
 
 on:
   schedule:
@@ -17,22 +19,50 @@ permissions:
   contents: read
 
 jobs:
-  fuzz:
-    name: Fuzz
+  targets:
+    name: Fuzz targets
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
-      # Go 1.26 has a fuzz coordinator race at the end of -fuzztime
-      # (go.dev/issue/75804): fuzz on the current stable Go, as go-ci does.
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
-      - run: make fuzz FUZZTIME=${{ inputs.fuzztime || '5m' }}
+      - id: list
+        run: |
+          matrix=$(make -s fuzz-targets | jq -Rnc '[inputs | split(" ") | {pkg: .[0], target: .[1]}]')
+          echo "$matrix" | jq .
+          test "$(echo "$matrix" | jq length)" -gt 0
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    needs: targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      # Go 1.26 has a fuzz coordinator race at the end of -fuzztime
+      # (go.dev/issue/75804): fuzz on the current stable Go, as go-ci does.
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go test -run '^$' -fuzz "^${TARGET}$" -fuzztime "${FUZZTIME}" "${PKG}"
+        env:
+          PKG: ${{ matrix.pkg }}
+          TARGET: ${{ matrix.target }}
+          FUZZTIME: ${{ inputs.fuzztime || '5m' }}
       - name: Upload the failing inputs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuzz-failures
+          name: fuzz-failures-${{ strategy.job-index }}-${{ matrix.target }}
           path: "**/testdata/fuzz/"
           if-no-files-found: ignore

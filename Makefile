@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all check test test-race coverage coverage-check coverage-pkg-check cover e2e fuzz cross bench lint lint-ci vuln fmt vet clean test-interop interop docs-check
+.PHONY: help all check test test-race coverage coverage-check coverage-pkg-check cover e2e fuzz fuzz-targets cross bench lint lint-ci vuln fmt vet clean test-interop interop docs-check
 
 # Parent otfabric/go.work may pin older modules; isolate toolchain commands.
 export GOWORK := off
@@ -63,6 +63,11 @@ coverage-pkg-check: coverage ## Fail when a package is below COVER_PKG_MIN
 cover: coverage ## Open coverage report in browser
 	@echo "Opening coverage report"
 	@go tool cover -html=coverage.out
+
+fuzz-targets: ## List every Fuzz target as "package target", one per line
+	@for pkg in $$(go list ./...); do \
+		for t in $$(go test -list '^Fuzz' $$pkg | grep '^Fuzz'); do echo "$$pkg $$t"; done; \
+	done
 
 fuzz: ## Run every Fuzz target for FUZZTIME (targets discovered, never listed)
 	@for pkg in $$(go list ./...); do \
