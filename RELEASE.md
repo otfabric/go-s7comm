@@ -1,5 +1,22 @@
 # go-s7comm Releases
 
+## v0.16.1
+
+**Date:** 2026-11-14
+**Previous release:** v0.16.0
+
+No API change and no change in behaviour.
+
+### Changed
+
+- The client splits an answer into its parameter and data sections with `int` arithmetic. The two lengths are 16 bits each; added as 16-bit numbers they wrap at 65536. Since v0.16.0 the client accepts transport messages of at most 65535 bytes, which keeps an answer below that; the split no longer depends on it.
+
+### Testing
+
+- `client` `TestSplitS7Payload`: the section lengths at their boundaries, with sums of 65535, 65536, 65537 and twice 65535.
+
+---
+
 ## v0.16.0
 
 **Date:** 2026-11-14

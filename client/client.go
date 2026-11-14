@@ -251,15 +251,25 @@ func (c *Client) sendReceive(ctx context.Context, req []byte, expectedPDURef uin
 		return nil, nil, wire.NewS7ErrorWithParam(header.ErrorClass, header.ErrorCode, param)
 	}
 
-	need := int(header.ParamLength) + int(header.DataLength)
-	if len(rest) < need {
+	paramData, dataData, ok := splitS7Payload(header, rest)
+	if !ok {
+		need := int(header.ParamLength) + int(header.DataLength)
 		return nil, nil, fmt.Errorf("short S7 payload: need %d bytes, got %d: %w", need, len(rest), ErrProtocolFailure)
 	}
 
-	paramData := rest[:header.ParamLength]
-	dataData := rest[header.ParamLength : header.ParamLength+header.DataLength]
-
 	return paramData, dataData, nil
+}
+
+// splitS7Payload returns the parameter and data sections that the header
+// declares, or false when rest is shorter than both together. The lengths
+// are added as ints: as uint16 their sum would wrap at 65536. The client's
+// TSDU limit keeps a message below that today; this does not depend on it.
+func splitS7Payload(header *wire.S7Header, rest []byte) (param, data []byte, ok bool) {
+	paramLen, dataLen := int(header.ParamLength), int(header.DataLength)
+	if len(rest) < paramLen+dataLen {
+		return nil, nil, false
+	}
+	return rest[:paramLen], rest[paramLen : paramLen+dataLen], true
 }
 
 // Close closes the connection
