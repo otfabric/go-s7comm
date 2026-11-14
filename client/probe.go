@@ -377,11 +377,10 @@ func runFollowUp(ctx context.Context, conn *cotp.Conn, pduRef uint16, strategy C
 		if hdr.ErrorClass != 0 || hdr.ErrorCode != 0 {
 			return false, fmt.Sprintf("S7 error 0x%02X/0x%02X", hdr.ErrorClass, hdr.ErrorCode)
 		}
-		need := int(hdr.ParamLength) + int(hdr.DataLength)
-		if len(rest) < need {
+		_, dataSlice, ok := splitS7Payload(hdr, rest)
+		if !ok {
 			return false, "short S7 payload"
 		}
-		dataSlice := rest[hdr.ParamLength : hdr.ParamLength+hdr.DataLength]
 		if _, err := wire.ParseSZLResponse(dataSlice); err != nil {
 			return false, err.Error()
 		}
