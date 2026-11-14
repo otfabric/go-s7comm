@@ -1,5 +1,18 @@
 # go-s7comm Releases
 
+## v0.16.3
+
+**Date:** 2026-11-14
+**Previous release:** v0.16.2
+
+No API change.
+
+### Changed
+
+- Built on go-cotp v1.4.1 (was v1.4.0) and go-tpkt v1.2.1 (was v1.2.0). go-tpkt v1.2.1 refuses a write count from the underlying writer that is negative or larger than what was asked; go-cotp v1.4.1 reads each TPDU of an open connection up to the negotiated TPDU size (go-cotp and go-tpkt RELEASE.md).
+
+---
+
 ## v0.16.2
 
 **Date:** 2026-11-14
