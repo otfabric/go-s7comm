@@ -1,5 +1,19 @@
 # go-s7comm Releases
 
+## v0.15.2
+
+**Date:** 2026-11-14
+**Previous release:** v0.15.1
+
+No API change.
+
+### Changed
+
+- Built on go-cotp v1.3.0 (was v1.2.0). A client no longer fails the handshake when the responding transport selector of the CC differs from the called one (X.224 §13.3.4); the negotiated value is kept as before.
+- CI: otfabric/engineering policy 1.6 and the shared workflows v3.8.0. Releases now run the API compatibility gate before tagging.
+
+---
+
 ## v0.15.1
 
 **Date:** 2026-11-11
