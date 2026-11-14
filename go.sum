@@ -1,9 +1,9 @@
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/otfabric/go-cotp v1.4.0 h1:WPtRayM4ZoFT0oEzeOY/Ayov0xSVKHQ47LLU6KEB4N8=
-github.com/otfabric/go-cotp v1.4.0/go.mod h1:h/4c74u3LqEKoX4vcmP5XfEmbSgNcgmBGj4KZ7TqD9w=
-github.com/otfabric/go-tpkt v1.2.0 h1:xGVR5imstsgTmmAp3Fka2pB+sd/0KLiWB1lm1NFpxQk=
-github.com/otfabric/go-tpkt v1.2.0/go.mod h1:qGkrTZ03mIwhCQZCL9S3OaOAVyw9TVdZXJf1lSYRLog=
+github.com/otfabric/go-cotp v1.4.1 h1:a1mmGAj4rpX4YyPFVuNvWBWlg5nn7FNw82eJsI7lbvo=
+github.com/otfabric/go-cotp v1.4.1/go.mod h1:ozut+RnjLgo607YTiPK6BFk0eiGJ+WkGs4dAqeFInGM=
+github.com/otfabric/go-tpkt v1.2.1 h1:wkH6eup1XWSAagGX3s5TOzCq9vfaCVD/7p8QSm1j2ck=
+github.com/otfabric/go-tpkt v1.2.1/go.mod h1:qGkrTZ03mIwhCQZCL9S3OaOAVyw9TVdZXJf1lSYRLog=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.8.0 h1:pSgiaMZlXftHpm5L7V1+rVB+AZJydKsMxsQBIJw4PKk=
