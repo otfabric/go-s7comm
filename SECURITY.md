@@ -34,7 +34,7 @@ Classic S7comm runs over ISO-on-TCP (port 102) with no authentication and no enc
 
 ### The Test Server
 
-Package `server` lets anyone who reaches its port read and write all of its memory, like the protocol itself. It is for tests: bind it to loopback or an isolated test network. `MaxConnections` (default 32), `HandshakeTimeout` (5 s) and `IdleTimeout` (off by default) bound what one peer can hold; set `IdleTimeout` on a shared network. Its request decoders and handler are fuzzed.
+Package `server` lets anyone who reaches its port read and write all of its memory, like the protocol itself. It is for tests: bind it to loopback or an isolated test network. `MaxConnections` (default 32), `HandshakeTimeout` (5 s) and `IdleTimeout` (off by default) bound what one peer can hold; `IdleTimeout` also closes a connection that does not take its answers; set `IdleTimeout` on a shared network. Its request decoders and handler are fuzzed.
 
 ### Scanning and Probing
 
@@ -49,7 +49,7 @@ Package `server` lets anyone who reaches its port read and write all of its memo
 
 ### Timeouts
 
-- `WithTimeout` bounds `Connect` (dial and handshake) only. Reads, writes and uploads are bounded by the context you pass; use `context.WithTimeout` or `WithDeadline`, or an unresponsive peer can block a call indefinitely. The scan helpers bound every step by their own timeout, including the read of `CompareRead`
+- `WithTimeout` bounds `Connect` (dial and handshake) only. Reads, writes and uploads are bounded by the context you pass; use `context.WithTimeout` or `WithDeadline`, or an unresponsive peer can block a call indefinitely. The scan helpers bound every step by their own timeout, including the read of `CompareRead` and each probe of `ProbeReadableRanges` (`RangeProbeRequest.Timeout`, default 5 s)
 
 ### Input Handling
 

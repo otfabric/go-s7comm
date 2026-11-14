@@ -829,6 +829,9 @@ type RangeProbeRequest struct {
 	Repeat      int // repeat each probe N times for stability
 	Interval    time.Duration
 	Parallelism int // max concurrent probes; if <=0, sequential. API compatibility only—connection-backed probes are serialized, no concurrent wire I/O.
+	// Timeout bounds each probe read. 0 = 5s. A probe that times out ends the
+	// session (see LIMITATIONS.md), so the remaining probes fail fast.
+	Timeout time.Duration
 }
 ```
 

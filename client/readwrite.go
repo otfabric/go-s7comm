@@ -165,6 +165,10 @@ func (c *Client) ReadArea(ctx context.Context, addr model.Address) (*ReadResult,
 			return out, nil
 		}
 		result = append(result, item.Data...)
+		if len(item.Data) < chunkSize {
+			// Fewer bytes than asked: later chunks would land at the wrong offsets.
+			break
+		}
 		offset += chunkSize
 	}
 

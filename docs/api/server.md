@@ -117,8 +117,8 @@ type Config struct {
 	MaxConnections int
 	// HandshakeTimeout bounds the COTP connect of a new client. Zero means DefaultHandshake.
 	HandshakeTimeout time.Duration
-	// IdleTimeout closes a connection that sends no request for this long.
-	// Zero means no limit.
+	// IdleTimeout closes a connection that sends no request for this long,
+	// or that does not take a response within this long. Zero means no limit.
 	IdleTimeout time.Duration
 	// Logger receives connection and request diagnostics. Nil discards them.
 	Logger *slog.Logger

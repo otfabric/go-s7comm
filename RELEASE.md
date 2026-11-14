@@ -1,5 +1,33 @@
 # go-s7comm Releases
 
+## v0.16.0
+
+**Date:** 2026-11-14
+**Previous release:** v0.15.2
+
+### Added
+
+- `RangeProbeRequest.Timeout` bounds each probe read of `ProbeReadableRanges` (0 = 5 s), as SECURITY.md describes for the scan helpers. Before, a probe waited as long as the caller's context.
+
+### Changed
+
+- `ReadArea` ends a chunked read at the first chunk answered with fewer bytes than asked. The status stays `short-read`; `Data` now holds the bytes from `Start` up to that point and no later chunks are requested.
+- The client accepts transport messages (TSDUs) of at most 65535 bytes, the largest S7 PDU; the go-cotp default was 4 MiB.
+- Package `server`: `IdleTimeout` also bounds writing an answer, so a client that sends requests but does not read the answers is disconnected and frees its connection slot.
+- Setup Communication answers are decoded from the declared parameter section only.
+- `internal/capture` rejects record lengths that do not fit an `int` on 32-bit platforms.
+
+### Tests
+
+- `client`: `TestReadAreaStopsAfterShortChunk`, `TestProbeReadableRangesTimeoutBoundsProbe`, `TestConnectRefusesOversizedMessage`; `TestWithRateLimit` answers every chunk in full.
+- `server`: `TestIdleTimeoutCoversUnreadAnswers`.
+
+### Documentation
+
+- SECURITY.md, API.md, ERRORS.md and docs/api describe the probe timeout, the `IdleTimeout` write bound, the TSDU limit and the short-read data; API.md names go-cotp v1.3.0.
+
+---
+
 ## v0.15.2
 
 **Date:** 2026-11-14

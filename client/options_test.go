@@ -157,7 +157,10 @@ func TestWithAutoRackSlot(t *testing.T) {
 }
 
 func TestWithRateLimit(t *testing.T) {
-	port, cleanup := startFakeSetupAndReadServer(t, 480)
+	// Answer every chunk in full: a short chunk ends the read early.
+	port, cleanup := startFakeBitServer(t, func(pduRef uint16, req []byte) []byte {
+		return readVarAnswer(pduRef, make([]byte, int(binary.BigEndian.Uint16(req[16:18]))))
+	})
 	defer cleanup()
 
 	c := New("127.0.0.1",

@@ -61,7 +61,7 @@ func (c *Client) PDUSize() int
 
 Behavior notes:
 
-- Connect performs TCP dial, go-cotp TP0 handshake (`cotp.Connect` with two-byte big-endian TSAP selectors), and S7 setup communication. S7 PDUs are exchanged as complete TSDUs (`WriteTSDU` / `ReadTSDU`). Default COTP `MaxTPDULength` offer is 1024.
+- Connect performs TCP dial, go-cotp TP0 handshake (`cotp.Connect` with two-byte big-endian TSAP selectors), and S7 setup communication. S7 PDUs are exchanged as complete TSDUs (`WriteTSDU` / `ReadTSDU`). Default COTP `MaxTPDULength` offer is 1024. The client accepts TSDUs of at most 65535 bytes, the largest S7 PDU.
 - A second Connect() on an already-connected client only replaces the session after the new handshake succeeds; a failed reconnect leaves the existing session intact.
 - **Context:** cancel (with or without deadline) is honored on dial (by a custom `Dialer` only if it honors `ctx`) and TSDU I/O via go-cotp; mid-I/O cancel aborts the session. `WithTimeout` bounds Connect, not later PDUs. See [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
 - On setup failure of a new dial, that connection is closed; a prior healthy session is left intact until a successful swap.
@@ -140,7 +140,7 @@ func (c *Client) ReadMerkers(ctx context.Context, offset, size int) (*ReadResult
 Behavior notes:
 
 - Byte read methods return `*ReadResult` and a validation `error`. Use `result.OK()` for success; `result.Err()` for a non-success read outcome; `result.Data` for the payload. Empty or short reads are never reported as success. See [ERRORS.md](ERRORS.md).
-- ReadArea chunks requests based on negotiated PDU size. Status is derived from requested vs returned length (success, short-read, empty-read) or from S7 item return codes (rejected). Non-success Read Var items with transport size `0x00` (common for Snap7 address faults) are surfaced as rejected with `ReturnCode` set, not as a protocol parse failure.
+- ReadArea chunks requests based on negotiated PDU size. A chunk answered with fewer bytes than asked ends the read, so `Data` always holds the bytes of `Start`, `Start+1`, ... up to the first gap. Status is derived from requested vs returned length (success, short-read, empty-read) or from S7 item return codes (rejected). Non-success Read Var items with transport size `0x00` (common for Snap7 address faults) are surfaced as rejected with `ReturnCode` set, not as a protocol parse failure.
 - WriteArea writes `len(data)` bytes; `addr.Size` is ignored. Large payloads are chunked. Uses WriteVar with optional rate limiting. Invalid address returns `*ValidationError`.
 - `ReadBit` / `WriteBit` use native S7 BIT transport (not byte read-modify-write) and return a **strict** `error` (not `ReadResult`). `BitOffset` must be `0..7` (no wrap); invalid addresses return `*ValidationError`. `ReadDBBit` / `WriteDBBit` are DB helpers (`DB1.DBX10.3` → db=1, byte=10, bit=3).
 
@@ -161,6 +161,7 @@ type RangeProbeRequest struct {
     Repeat      int
     Interval    time.Duration
     Parallelism int
+    Timeout     time.Duration // bounds each probe read; 0 = 5s
 }
 
 type ReadProbeObservation struct {
@@ -601,7 +602,7 @@ import "github.com/otfabric/go-s7comm/wire"
 
 ### Transport stack (go-cotp)
 
-Live connections use **github.com/otfabric/go-cotp** TP0 service (go.mod requires `v1.2.0`). The client dials TCP, calls `cotp.Connect` with opaque TSAP selectors, then exchanges complete S7 PDUs as TSDUs. TPKT framing and COTP CR/CC/DT segmentation are owned by go-cotp (which depends on go-tpkt). This module does not expose a local transport package and does not import go-tpkt in production or test code.
+Live connections use **github.com/otfabric/go-cotp** TP0 service (go.mod requires `v1.3.0`). The client dials TCP, calls `cotp.Connect` with opaque TSAP selectors, then exchanges complete S7 PDUs as TSDUs. TPKT framing and COTP CR/CC/DT segmentation are owned by go-cotp (which depends on go-tpkt). This module does not expose a local transport package and does not import go-tpkt in production or test code.
 
 ### TSAP helpers
 
@@ -766,7 +767,7 @@ type Config struct {
     MaxPDUSize       int           // 240..4096, default 480: the largest PDU Setup Communication grants
     MaxConnections   int           // default 32; more are closed on accept
     HandshakeTimeout time.Duration // COTP connect, default 5s
-    IdleTimeout      time.Duration // close a connection with no request for this long; 0 = none
+    IdleTimeout      time.Duration // close a connection with no request, or that takes no answer, for this long; 0 = none
     Logger           *slog.Logger  // nil = silent
 }
 type AreaOptions struct{ ReadOnly bool }
