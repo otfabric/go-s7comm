@@ -26,6 +26,9 @@ type RangeProbeRequest struct {
 	Repeat      int // repeat each probe N times for stability
 	Interval    time.Duration
 	Parallelism int // max concurrent probes; if <=0, sequential. API compatibility only—connection-backed probes are serialized, no concurrent wire I/O.
+	// Timeout bounds each probe read. 0 = 5s. A probe that times out ends the
+	// session (see LIMITATIONS.md), so the remaining probes fail fast.
+	Timeout time.Duration
 }
 
 // ReadProbeObservation is one probe at one offset.
@@ -134,7 +137,7 @@ func (c *Client) probeOneOffset(ctx context.Context, req RangeProbeRequest, offs
 			case <-time.After(req.Interval):
 			}
 		}
-		res, err := c.ReadArea(ctx, addr)
+		res, err := c.probeRead(ctx, req.Timeout, addr)
 		if err != nil {
 			repeated = append(repeated, newFailedReadResult(probeSize, err))
 			continue
@@ -178,7 +181,7 @@ func (c *Client) probeOneOffset(ctx context.Context, req RangeProbeRequest, offs
 				case <-time.After(req.RetryDelay):
 				}
 			}
-			res, err := c.ReadArea(ctx, addr)
+			res, err := c.probeRead(ctx, req.Timeout, addr)
 			if err != nil {
 				attemptResults = append(attemptResults, newFailedReadResult(probeSize, err))
 				continue
@@ -299,4 +302,17 @@ func ConsolidateSpans(observations []ReadProbeObservation, step, probeSize int) 
 	}
 
 	return spans, summary
+}
+
+// defaultRangeProbeTimeout bounds each probe read when RangeProbeRequest.Timeout is 0.
+const defaultRangeProbeTimeout = 5 * time.Second
+
+// probeRead runs one ReadArea bounded by the probe timeout.
+func (c *Client) probeRead(ctx context.Context, timeout time.Duration, addr model.Address) (*ReadResult, error) {
+	if timeout <= 0 {
+		timeout = defaultRangeProbeTimeout
+	}
+	pctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return c.ReadArea(pctx, addr)
 }

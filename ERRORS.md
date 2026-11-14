@@ -95,7 +95,7 @@ func (r *ReadResult) Err() error    // nil | ErrNilReadResult | *ReadOutcomeErro
 | Status | Meaning |
 |--------|---------|
 | `success` | Returned length equals requested |
-| `short-read` | `0 < returned < requested` |
+| `short-read` | `0 < returned < requested`; `Data` holds the bytes from `Start` up to the first short chunk |
 | `empty-read` | Requested > 0 but returned 0 |
 | `rejected` | Target returned an S7 item/header error (`ReturnCode` set when item-level) |
 | `timeout` | Context or network timeout |

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"time"
 
@@ -71,6 +72,8 @@ func connectCOTP(ctx context.Context, raw net.Conn, timeout time.Duration, local
 		LocalSelector:  tsapSelector(localTSAP),
 		RemoteSelector: tsapSelector(remoteTSAP),
 		MaxTPDULength:  defaultMaxTPDULength,
+		// An S7 PDU length is 16 bits, so no valid message is longer.
+		MaxTSDULength: math.MaxUint16,
 	})
 }
 
@@ -116,6 +119,8 @@ func performS7Setup(ctx context.Context, conn *cotp.Conn, pduRef uint16, maxAmqC
 	if err != nil {
 		return nil, fmt.Errorf("parse S7 header: %w", errors.Join(err, ErrProtocolFailure))
 	}
+	// ParseS7Header checked that the declared sections fit; decode only the parameter section.
+	paramData = paramData[:header.ParamLength]
 	if header.PDURef != pduRef {
 		return nil, &PDURefMismatchError{Expected: pduRef, Got: header.PDURef}
 	}

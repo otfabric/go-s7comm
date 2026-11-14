@@ -123,7 +123,7 @@ func pcapPackets(b []byte, bo binary.ByteOrder) ([]packet, error) {
 		}
 		n := int(bo.Uint32(b[off+8 : off+12]))
 		off += 16
-		if n > len(b)-off {
+		if n < 0 || n > len(b)-off {
 			return nil, ErrFormat
 		}
 		out = append(out, packet{link: link, data: b[off : off+n]})
@@ -171,7 +171,7 @@ func pcapngPackets(b []byte) ([]packet, error) {
 			}
 			ifc := int(bo.Uint32(body))
 			capLen := int(bo.Uint32(body[12:]))
-			if ifc >= len(links) || capLen > len(body)-20 {
+			if ifc < 0 || ifc >= len(links) || capLen < 0 || capLen > len(body)-20 {
 				return nil, ErrFormat
 			}
 			out = append(out, packet{link: links[ifc], data: body[20 : 20+capLen]})
@@ -180,6 +180,9 @@ func pcapngPackets(b []byte) ([]packet, error) {
 				return nil, ErrFormat
 			}
 			capLen := min(int(bo.Uint32(body)), len(body)-4)
+			if capLen < 0 {
+				return nil, ErrFormat
+			}
 			out = append(out, packet{link: links[0], data: body[4 : 4+capLen]})
 		}
 		off += n
