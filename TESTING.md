@@ -11,7 +11,7 @@
 | Fuzz | `make fuzz` (`FUZZTIME`, default 10s per target) | none | `ci.yml` (go-ci `fuzz-time: 10s`); `extended.yml`, nightly, 5 minutes per target, one job per target |
 | Benchmarks | `make bench` | none | not run |
 | Cross-compilation | `make cross` | none | not run |
-| Interoperability | `make interop` | Docker, ports 1102 and 2102 free | `interop.yml`, every push and pull request |
+| Interoperability | `make interop` | Docker, ports 1102 and 2102 free | `interop.yml`, every pull request |
 | Recorded traffic of real CPUs | part of `make test` | none; the captures are in `testdata/captures` | `ci.yml` (go-ci) |
 
 `make check` runs formatting, both linters, govulncheck, vet (including a compile of `interop/`), `test` and `coverage-pkg-check`. It does not start Docker.
@@ -68,3 +68,15 @@ Regression procedure: when a fuzz run fails, Go writes the input to `testdata/fu
 ## Not tested here
 
 - No test against a live PLC: the captures are recorded traffic, and only the requests in them are covered ([LIMITATIONS.md](LIMITATIONS.md#verification)).
+
+## When CI runs
+
+| Event | Workflow | What runs |
+|---|---|---|
+| Pull request | `pr.yml` | `docs.yml` (docsync, otfabric-policy) always; `ci.yml`, `interop.yml` unless every changed file is documentation; then `OT Fabric Required Checks` |
+| Push to a branch | none | nothing; dispatch `ci.yml`, `interop.yml` to test a branch without a pull request |
+| Push to `main` | `docs.yml` | the light checks; the merged commit was tested as the pull request's merge commit |
+| Schedule | `extended.yml` | the scheduled runs, on `main` |
+| Release | `release.yml` | the release workflow tests the release commit again |
+
+Documentation means an added or modified `*.md` file outside `.github/`, `testdata/` and `vendor/`, other than `AGENTS.md` and `CLAUDE.md`. A deleted or renamed document, or any other file, runs everything. `OT Fabric Required Checks` fails unless every job that applies succeeded; its summary lists them.

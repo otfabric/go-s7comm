@@ -15,7 +15,7 @@ Upstream versions are from snap7-interop `versions.yaml` at v0.6.1.
 
 ## Results
 
-`interop.yml` runs the suite on every push and pull request. The suite runs all 15 fixtures vendored in [interop/testdata/fixtures](interop/testdata/fixtures) against both peers, at rack 0, slot 2, PDU size 480. Each server is restarted for each fixture.
+`interop.yml` runs the suite on every pull request. The suite runs all 15 fixtures vendored in [interop/testdata/fixtures](interop/testdata/fixtures) against both peers, at rack 0, slot 2, PDU size 480. Each server is restarted for each fixture.
 
 | Fixture | Exercises | native | python |
 |---|---|---|---|
