@@ -18,6 +18,53 @@ import (
 // answering "more data follows" cannot hold the client.
 const maxUserdataFollowUps = 256
 
+// userdataAnswer decodes one packet of a user data answer to a request of
+// the given function group and subfunction: its parameter section and the
+// payload of its data section. what names the packet in an error.
+//
+// The packet must be a response (type 8) of the group and subfunction that
+// were asked for, as every recorded answer is (testdata/captures); anything
+// else is an ErrProtocolFailure error. A refusal comes back as an S7Error
+// (userdataPayload).
+func userdataAnswer(what string, param, data []byte, group, subfunc byte) (*wire.UserdataParam, []byte, error) {
+	up, err := wire.ParseUserdataParam(param)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", what, errors.Join(err, ErrProtocolFailure))
+	}
+	if param[5]&0xf0 != wire.UserdataTypeResponse || up.Group != group || up.Subfunction != subfunc {
+		return nil, nil, fmt.Errorf("%s: type 0x%X, group %d, subfunction 0x%02X answers a request of group %d, subfunction 0x%02X: %w",
+			what, param[5]>>4, up.Group, up.Subfunction, group, subfunc, ErrProtocolFailure)
+	}
+	payload, err := userdataPayload(up, data)
+	if err != nil {
+		return nil, nil, err
+	}
+	return up, payload, nil
+}
+
+// userdataPayload returns the payload of a user data answer, or the error
+// the answer reports. A CPU refuses a request with an item return code in
+// the data section and often an error code in the parameter section as well
+// (recorded: 0xD402 for an SZL list, 0xD209 for a block). The error keeps
+// the return code in Code and names the parameter error in its message. An
+// error code on an answer whose data section does not report a refusal is
+// returned as an S7Error of that code: Class its high byte, Code its low.
+func userdataPayload(up *wire.UserdataParam, data []byte) ([]byte, error) {
+	payload, err := wire.ParseUserdataData(data)
+	if up.ErrorCode == 0 {
+		return payload, err
+	}
+	text := wire.ParamErrorCodeString(up.ErrorCode)
+	if refusal, ok := errors.AsType[*wire.S7Error](err); ok && refusal.Code != 0 {
+		return nil, &wire.S7Error{
+			Class:   refusal.Class,
+			Code:    refusal.Code,
+			Message: fmt.Sprintf("%s (parameter error 0x%04X: %s)", refusal.Message, up.ErrorCode, text),
+		}
+	}
+	return nil, &wire.S7Error{Class: byte(up.ErrorCode >> 8), Code: byte(up.ErrorCode), Message: text}
+}
+
 // userdata sends a user data request and collects the payload of its
 // response, asking for each further packet while the CPU marks it "more
 // data follows" (SZL lists and block lists longer than one PDU).
@@ -26,14 +73,11 @@ func (c *Client) userdata(ctx context.Context, req []byte, ref uint16, group, su
 	if err != nil {
 		return nil, nil, err
 	}
-	up, err := wire.ParseUserdataParam(param)
+	up, payload, err := userdataAnswer("user data response", param, data, group, subfunc)
 	if err != nil {
-		return nil, nil, fmt.Errorf("user data response: %w", errors.Join(err, ErrProtocolFailure))
-	}
-	first = data
-	if payload, err = wire.ParseUserdataData(data); err != nil {
 		return nil, nil, err
 	}
+	first = data
 	payload = append([]byte(nil), payload...)
 	for n := 0; up.More; n++ {
 		if n == maxUserdataFollowUps {
@@ -44,11 +88,8 @@ func (c *Client) userdata(ctx context.Context, req []byte, ref uint16, group, su
 		if err != nil {
 			return nil, nil, err
 		}
-		if up, err = wire.ParseUserdataParam(param); err != nil {
-			return nil, nil, fmt.Errorf("user data follow-up: %w", errors.Join(err, ErrProtocolFailure))
-		}
-		more, err := wire.ParseUserdataData(data)
-		if err != nil {
+		var more []byte
+		if up, more, err = userdataAnswer("user data follow-up", param, data, group, subfunc); err != nil {
 			return nil, nil, err
 		}
 		payload = append(payload, more...)
@@ -57,7 +98,10 @@ func (c *Client) userdata(ctx context.Context, req []byte, ref uint16, group, su
 }
 
 // readSZL reads one SZL list, all packets of it. Data of the result is the
-// list header (record length, record count) and every record.
+// list header (record length, record count) and every record. The answer
+// must carry the SZL ID that was asked for. Its index is not compared: a
+// recorded CPU 315-2 PN/DP answers SZL 0x0424 index 4 with index 0
+// (testdata/captures, tia-v13_s7-300_go-online).
 func (c *Client) readSZL(ctx context.Context, id, index uint16) (*wire.SZLResponse, error) {
 	ref := c.nextPDURef()
 	first, payload, err := c.userdata(ctx, wire.EncodeSZLRequest(ref, id, index), ref, wire.UserdataGroupCPU, wire.UserdataSZL)
@@ -67,6 +111,9 @@ func (c *Client) readSZL(ctx context.Context, id, index uint16) (*wire.SZLRespon
 	resp, err := wire.ParseSZLResponse(first)
 	if err != nil {
 		return nil, err
+	}
+	if resp.SZLID != id {
+		return nil, fmt.Errorf("SZL answer is list 0x%04X, asked for 0x%04X: %w", resp.SZLID, id, ErrProtocolFailure)
 	}
 	resp.Data = payload[4:] // after SZL ID and index
 	return resp, nil

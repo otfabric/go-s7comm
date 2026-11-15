@@ -727,21 +727,30 @@ func TestProbeRackSlotsStrictWithCPUState(t *testing.T) {
 	}
 }
 
-func BenchmarkProbeRackSlots(b *testing.B) {
-	ctx := context.Background()
+// BenchmarkE2EProbeRackSlots probes four rack/slot pairs in strict mode,
+// two at a time: per pair a dial, the COTP and S7 setup exchanges, one SZL
+// query and the close, against an in-process peer (pipePeers) through
+// RackSlotProbeRequest.Dialer. No socket is involved.
+func BenchmarkE2EProbeRackSlots(b *testing.B) {
+	peers := &pipePeers{op: answerReadsAndSZL}
+	defer peers.wait()
 	req := RackSlotProbeRequest{
-		Address:     "127.0.0.1",
-		Port:        7,
+		Address:     "192.0.2.1",
 		RackMin:     0,
 		RackMax:     1,
 		SlotMin:     0,
 		SlotMax:     1,
-		Timeout:     5 * time.Millisecond,
 		Parallelism: 2,
+		Strict:      true,
+		Confirm:     ConfirmSZL,
+		Dialer:      peers.dial,
 	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = ProbeRackSlots(ctx, req)
+	b.ReportAllocs()
+	for b.Loop() {
+		result, err := ProbeRackSlots(context.Background(), req)
+		if err != nil || len(result.Candidates) != 4 || result.ConfirmedByQuery != 4 {
+			b.Fatalf("ProbeRackSlots = %+v, %v", result, err)
+		}
 	}
 }
 

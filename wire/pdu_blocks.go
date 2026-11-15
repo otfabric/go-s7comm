@@ -5,6 +5,7 @@ package wire
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -144,20 +145,29 @@ type BlockInfoData struct {
 const blockInfoSize = 70
 
 // ParseBlockInfoResponse parses the payload (ParseUserdataData) of a block
-// info response.
+// info response. The load memory length and the security field are 32 bits
+// on the wire: a value above math.MaxInt32 is refused, so that both fields
+// hold the wire value on every platform, also where int has 32 bits.
 func ParseBlockInfoResponse(payload []byte) (BlockInfoData, error) {
 	if len(payload) < blockInfoSize {
 		return BlockInfoData{}, fmt.Errorf("block info data too short: need %d bytes, got %d", blockInfoSize, len(payload))
 	}
 	b := payload
+	loadMemory, security := binary.BigEndian.Uint32(b[14:18]), binary.BigEndian.Uint32(b[18:22])
+	if loadMemory > math.MaxInt32 {
+		return BlockInfoData{}, fmt.Errorf("block info load memory length %d above %d", loadMemory, math.MaxInt32)
+	}
+	if security > math.MaxInt32 {
+		return BlockInfoData{}, fmt.Errorf("block info security field %d above %d", security, math.MaxInt32)
+	}
 	text := func(s []byte) string { return strings.TrimRight(string(s), "\x00 ") }
 	return BlockInfoData{
 		Flags:        b[9],
 		Language:     b[10],
 		SubBlockType: b[11],
 		Number:       int(binary.BigEndian.Uint16(b[12:14])),
-		LoadMemory:   int(binary.BigEndian.Uint32(b[14:18])),
-		Security:     int(binary.BigEndian.Uint32(b[18:22])),
+		LoadMemory:   int(loadMemory),
+		Security:     int(security),
 		SSBLength:    int(binary.BigEndian.Uint16(b[34:36])),
 		AddLength:    int(binary.BigEndian.Uint16(b[36:38])),
 		LocalData:    int(binary.BigEndian.Uint16(b[38:40])),
@@ -228,10 +238,12 @@ func uploadSessionRequest(pduRef uint16, fn byte, uploadID uint32) []byte {
 	return append(s7Header(ROSCTRJob, pduRef, paramLen, 0), param...)
 }
 
-// UploadChunk is one chunk returned by upload continuation responses.
+// UploadChunk is one chunk returned by upload continuation responses. Data
+// is borrowed from the data section given to ParseUploadResponse: copy it to
+// keep it or to change it. It has no capacity beyond its length.
 type UploadChunk struct {
 	Done bool
-	Data []byte
+	Data []byte // borrowed from the input
 }
 
 // ParseUploadResponse parses an upload response. The parameter's status
@@ -249,5 +261,5 @@ func ParseUploadResponse(param, data []byte) (*UploadChunk, error) {
 	if 4+n > len(data) {
 		return nil, fmt.Errorf("upload response length overrun: need %d bytes, have %d", 4+n, len(data))
 	}
-	return &UploadChunk{Done: param[1]&0x01 == 0, Data: data[4 : 4+n]}, nil
+	return &UploadChunk{Done: param[1]&0x01 == 0, Data: data[4 : 4+n : 4+n]}, nil
 }

@@ -35,6 +35,11 @@ type options struct {
 // Methods are invoked synchronously on the request path and must not block.
 // Args follow fmt.Sprintf conventions (e.g. Error("Connect failed: %v", err)).
 // Use NewSlogLogger to adapt a slog.Handler without changing this interface.
+//
+// The methods run while the client holds the lock that serialises its
+// operations. They may call ConnectionInfo and PDUSize of that client; they
+// must not call one of its operations, Connect or Close, which would wait
+// for that lock and not return.
 type Logger interface {
 	Debug(msg string, args ...any)
 	Info(msg string, args ...any)
@@ -102,6 +107,11 @@ func WithLogger(l Logger) Option {
 // Dialer opens the transport connection to addr ("host:port"). It receives
 // network "tcp". Like net.Dialer, it returns a non-nil connection exactly when
 // the error is nil.
+//
+// The Dialer of WithDialer runs inside Connect, while the client holds the
+// lock that serialises its operations: it may call ConnectionInfo and
+// PDUSize of that client, and must not call one of its operations, Connect
+// or Close, which would wait for that lock and not return.
 type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
 // WithDialer sets the function that opens the TCP connection of Connect, for

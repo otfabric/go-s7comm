@@ -219,7 +219,10 @@ func (c *Client) WriteArea(ctx context.Context, addr model.Address, data []byte)
 	rateLimit := c.opts.rateLimit
 	c.mu.RUnlock()
 
-	maxPayload := pduSize - wire.WriteVarRequestOverhead
+	// An even number of bytes per chunk: the encoder pads an odd payload by
+	// one byte, which would make a full chunk one byte longer than an odd
+	// PDU size allows.
+	maxPayload := (pduSize - wire.WriteVarRequestOverhead) &^ 1
 	if maxPayload < 1 {
 		maxPayload = 200
 	}

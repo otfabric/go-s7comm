@@ -71,6 +71,33 @@ func TestUserdata_FollowUpFailures(t *testing.T) {
 			}
 		})
 	}
+
+	// An answer that never ends, every packet as long as the session allows:
+	// each call that collects packets is cut at 256 follow-ups and allocates
+	// no more than a multiple of 257 packets of the negotiated PDU size.
+	const pdu = 480
+	// The collected payload, its growth, the transport's reassembly and the
+	// peer's own building of 257 packets: 32 times the octets on the wire.
+	const budget = 32 * (maxUserdataFollowUps + 1) * pdu
+	for _, tc := range userdataCalls {
+		t.Run("never ends, full packets: "+tc.name, func(t *testing.T) {
+			var packets atomic.Int32
+			port := startScriptedPeer(t, nil, endlessUserdata(pdu, &packets))
+			c := connectScripted(t, port)
+			var err error
+			got := allocatedBy(func() { _, err = tc.call(c, t) })
+			if !errors.Is(err, ErrProtocolFailure) || !strings.Contains(err.Error(), "longer than 256 packets") {
+				t.Fatalf("err = %v, want the packet limit", err)
+			}
+			if n := packets.Load(); n != maxUserdataFollowUps+1 {
+				t.Errorf("the peer was asked for %d packets, want %d", n, maxUserdataFollowUps+1)
+			}
+			t.Logf("allocated %d bytes, budget %d", got, budget)
+			if got > budget {
+				t.Errorf("allocated %d bytes, budget %d", got, budget)
+			}
+		})
+	}
 }
 
 func TestUserdata_FirstAnswerFailures(t *testing.T) {

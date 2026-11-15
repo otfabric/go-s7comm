@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -227,10 +228,12 @@ func TestCaptureReplayCPU315Snap7Session(t *testing.T) {
 		!bytes.Contains(up.Data[36:180], []byte("S7300/ET200M station_1")) || !bytes.Contains(up.Data[36:180], []byte("PLC_1")) {
 		t.Errorf("SDB 0 = %d bytes: % x", len(up.Data), up.Data)
 	}
-	// Get DB0: the CPU answers block info with return code 0x0A (log: "CPU : Item not available").
+	// Get DB0: the CPU answers block info with return code 0x0A (log: "CPU : Item not available")
+	// and parameter error 0xD209. The error keeps the return code and names the parameter error.
 	var s7Err *wire.S7Error
-	if _, err := c.GetBlockInfo(ctx, model.BlockDB, 0); !errors.As(err, &s7Err) || s7Err.Code != wire.RetCodeNotAvailable {
-		t.Errorf("GetBlockInfo DB 0 = %v, want object not available", err)
+	if _, err := c.GetBlockInfo(ctx, model.BlockDB, 0); !errors.As(err, &s7Err) || s7Err.Class != 0 || s7Err.Code != wire.RetCodeNotAvailable ||
+		!strings.Contains(s7Err.Message, "object not available") || !strings.Contains(s7Err.Message, "0xD209") {
+		t.Errorf("GetBlockInfo DB 0 = %v, want object not available with parameter error 0xD209", err)
 	}
 	r.noUnmatched(t)
 }

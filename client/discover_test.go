@@ -162,15 +162,22 @@ func TestDiscoverOptions(t *testing.T) {
 	}
 }
 
-func BenchmarkDiscover(b *testing.B) {
-	ctx := context.Background()
+// BenchmarkE2EDiscover finds one S7 host: a dial, the COTP and S7 setup
+// exchanges and the close, against an in-process peer (pipePeers) through
+// WithDiscoverDialer. No socket is involved.
+func BenchmarkE2EDiscover(b *testing.B) {
+	peers := &pipePeers{op: answerReadsAndSZL}
+	defer peers.wait()
 	opts := []DiscoverOption{
-		WithDiscoverTimeout(5),
 		WithDiscoverParallel(4),
 		WithDiscoverRackSlotRange(0, 0, 0, 0),
+		WithDiscoverDialer(peers.dial),
 	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = Discover(ctx, "127.0.0.1/32", opts...)
+	b.ReportAllocs()
+	for b.Loop() {
+		results, err := Discover(context.Background(), "192.0.2.1/32", opts...)
+		if err != nil || len(results) != 1 || !results[0].IsS7 || results[0].PDUSize != 480 {
+			b.Fatalf("Discover = %+v, %v", results, err)
+		}
 	}
 }

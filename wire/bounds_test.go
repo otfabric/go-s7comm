@@ -186,10 +186,57 @@ func FuzzParseSetupCommResponse(f *testing.F) {
 	})
 }
 
+// FuzzParseWriteVarResponse: the codes are the first octets of the data
+// section, one per counted item and at least one; ParseWriteVarResponse
+// succeeds exactly when every code is 0xFF; the codes encode to an answer
+// that decodes to the same codes, and that answer cut by one octet is
+// refused.
 func FuzzParseWriteVarResponse(f *testing.F) {
 	f.Add([]byte{FuncWriteVar, 1}, []byte{RetCodeSuccess})
 	f.Add([]byte{FuncWriteVar, 3}, []byte{RetCodeSuccess, RetCodeAddressFault})
-	f.Fuzz(func(t *testing.T, param, data []byte) { _ = ParseWriteVarResponse(param, data) })
+	for _, p := range seedPDUs(f, 8, answerTo(FuncWriteVar)) {
+		f.Add(p.param, p.data)
+	}
+	f.Fuzz(func(t *testing.T, param, data []byte) {
+		codes, err := ParseWriteVarResponseCodes(param, data)
+		if err != nil {
+			if codes != nil {
+				t.Fatalf("a refused answer returned %d codes", len(codes))
+			}
+			if ParseWriteVarResponse(param, data) == nil {
+				t.Fatal("ParseWriteVarResponse accepts an answer whose codes are refused")
+			}
+			return
+		}
+		if n := int(param[1]); param[0] != FuncWriteVar || n == 0 || len(codes) != n || cap(codes) != n {
+			t.Fatalf("%d codes (capacity %d) for %d items", len(codes), cap(codes), n)
+		}
+		if off, ok := within(data, codes); !ok || off != 0 {
+			t.Fatal("the codes are not the first octets of the data section")
+		}
+		allOK := true
+		for _, c := range codes {
+			allOK = allOK && c == RetCodeSuccess
+		}
+		if werr := ParseWriteVarResponse(param, data); (werr == nil) != allOK {
+			t.Fatalf("ParseWriteVarResponse = %v for codes % x", werr, codes)
+		}
+		pdu, err := EncodeWriteVarResponse(1, codes)
+		if err != nil {
+			t.Fatalf("EncodeWriteVarResponse: %v", err)
+		}
+		h, rest, err := ParseS7Header(pdu)
+		if err != nil {
+			t.Fatalf("encoded answer: %v", err)
+		}
+		p2, d2 := rest[:h.ParamLength], rest[h.ParamLength:]
+		if again, err := ParseWriteVarResponseCodes(p2, d2); err != nil || !bytes.Equal(again, codes) {
+			t.Fatalf("codes % x encode to an answer that decodes to % x, %v", codes, again, err)
+		}
+		if _, err := ParseWriteVarResponseCodes(p2, d2[:len(d2)-1]); err == nil {
+			t.Fatal("an answer cut by one code is accepted")
+		}
+	})
 }
 
 func FuzzParseBlockResponses(f *testing.F) {

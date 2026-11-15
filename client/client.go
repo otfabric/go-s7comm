@@ -63,6 +63,22 @@ func New(host string, opts ...Option) *Client {
 	return &Client{host: host, opts: *o}
 }
 
+// Connect dials the host, completes the COTP handshake and S7 Setup
+// Communication, and makes the new session the client's. A session that is
+// already in place is replaced, and its connection closed, only after the
+// new one is set up; a failed Connect leaves it as it was.
+//
+// A session ends with Close, and when a later call is given up after its
+// request was sent: its context ended, or the transport failed. The answer
+// to that request may still arrive, and the next request on the same
+// connection would read it, so the client closes the connection. Calls then
+// return ErrNotConnected until Connect succeeds again. A context that has
+// already ended when a call starts sends nothing and leaves the session
+// open, and so does an answer that arrives and is refused.
+//
+// The negotiated PDU size (PDUSize) is at most the size proposed with
+// WithMaxPDU, and an answer longer than it is refused with an error that
+// matches ErrProtocolFailure.
 func (c *Client) Connect(ctx context.Context) error {
 	port := c.opts.port
 	timeout := c.opts.timeout
@@ -209,8 +225,64 @@ func (c *Client) nextPDURef() uint16 {
 	}
 }
 
+// answerLimit is the longest answer a session accepts: the negotiated PDU
+// size, or the proposed one when the peer granted none.
+func answerLimit(negotiated, proposed int) int {
+	if negotiated > 0 {
+		return negotiated
+	}
+	return proposed
+}
+
+// answerTypeMatches reports whether a PDU of type got can answer a request
+// of type req. A job is acknowledged: Ack-Data, or Ack when the CPU refuses
+// it without a parameter section. A user data request is answered with user
+// data, or acknowledged when it is refused in the header. Recorded CPUs
+// answer this way (testdata/captures).
+func answerTypeMatches(req, got wire.ROSCTR) bool {
+	if got.IsAckData() || got.IsAck() {
+		return true
+	}
+	return req.IsUserdata() && got.IsUserdata()
+}
+
+// checkAnswerType returns an ErrProtocolFailure error when header is not of
+// a type that answers req (answerTypeMatches).
+func checkAnswerType(req []byte, header *wire.S7Header) error {
+	if len(req) < 2 || answerTypeMatches(wire.ROSCTR(req[1]), header.ROSCTR) {
+		return nil
+	}
+	return fmt.Errorf("answer of message type 0x%02X to a request of type 0x%02X: %w", byte(header.ROSCTR), req[1], ErrProtocolFailure)
+}
+
+// requestNotSent reports whether err, returned by WriteTSDU, means that the
+// context ended the call before any octet of the request was written. go-cotp
+// then returns the context error alone and keeps the connection open; an
+// error that also matches cotp.ErrClosed means octets had moved.
+func requestNotSent(err error) bool {
+	return (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) && !errors.Is(err, cotp.ErrClosed)
+}
+
+// endSession closes conn and clears the session, so that later calls return
+// ErrNotConnected. It is called when an exchange is given up after its
+// request was sent: the answer may still arrive, and the next request on the
+// same connection would read it as its own.
+func (c *Client) endSession(conn *cotp.Conn) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn == conn { // always, while the caller holds reqMu
+		_ = c.closeConnLocked()
+	}
+}
+
 // sendReceive sends req and returns response param/data. When expectedPDURef is non-zero,
 // the response S7 header PDU reference must match (request/response correlation).
+//
+// A context that ends before any octet of the request was written leaves the
+// session as it is. Once the request has been sent, an exchange that does not
+// read its answer (the context ends, or the transport fails) ends the session
+// (endSession). An answer that arrived and is refused (its length, reference,
+// type or content) leaves the session open: the stream is still aligned.
 func (c *Client) sendReceive(ctx context.Context, req []byte, expectedPDURef uint16) ([]byte, []byte, error) {
 	c.mu.RLock()
 	conn := c.conn
@@ -223,15 +295,23 @@ func (c *Client) sendReceive(ctx context.Context, req []byte, expectedPDURef uin
 		return nil, nil, fmt.Errorf("request size %d exceeds negotiated PDU size %d: %w", len(req), pduSize, ErrRequestExceedsPDU)
 	}
 	if err := conn.WriteTSDU(ctx, req); err != nil {
+		if !requestNotSent(err) {
+			c.endSession(conn)
+		}
 		return nil, nil, err
 	}
 	if err := ctx.Err(); err != nil {
+		c.endSession(conn)
 		return nil, nil, err
 	}
 
 	s7Data, err := conn.ReadTSDU(ctx)
 	if err != nil {
+		c.endSession(conn)
 		return nil, nil, err
+	}
+	if limit := answerLimit(pduSize, c.opts.maxPDU); len(s7Data) > limit {
+		return nil, nil, fmt.Errorf("answer of %d bytes exceeds the negotiated PDU size %d: %w", len(s7Data), limit, ErrProtocolFailure)
 	}
 
 	header, rest, err := wire.ParseS7Header(s7Data)
@@ -241,6 +321,9 @@ func (c *Client) sendReceive(ctx context.Context, req []byte, expectedPDURef uin
 
 	if expectedPDURef != 0 && header.PDURef != expectedPDURef {
 		return nil, nil, errors.Join(ErrProtocolFailure, &PDURefMismatchError{Expected: expectedPDURef, Got: header.PDURef})
+	}
+	if err := checkAnswerType(req, header); err != nil {
+		return nil, nil, err
 	}
 
 	if header.ErrorClass != 0 || header.ErrorCode != 0 {
@@ -264,15 +347,23 @@ func (c *Client) sendReceive(ctx context.Context, req []byte, expectedPDURef uin
 // declares, or false when rest is shorter than both together. The lengths
 // are added as ints: as uint16 their sum would wrap at 65536. The client's
 // TSDU limit keeps a message below that today; this does not depend on it.
+// Each section has no capacity beyond its length.
 func splitS7Payload(header *wire.S7Header, rest []byte) (param, data []byte, ok bool) {
 	paramLen, dataLen := int(header.ParamLength), int(header.DataLength)
 	if len(rest) < paramLen+dataLen {
 		return nil, nil, false
 	}
-	return rest[:paramLen], rest[paramLen : paramLen+dataLen], true
+	return rest[:paramLen:paramLen], rest[paramLen : paramLen+dataLen : paramLen+dataLen], true
 }
 
-// Close closes the connection
+// Close ends the session and closes the connection. On a client that is not
+// connected it does nothing and returns nil. Close is safe to call more than
+// once and from multiple goroutines.
+//
+// Close waits for the operation in flight on this client (a read, a write,
+// an upload, Connect) and does not interrupt it: to end a blocked call,
+// cancel its context. It must not be called from a Logger or a Dialer of
+// this client, which run while the operation is in flight.
 func (c *Client) Close() error {
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()

@@ -123,7 +123,10 @@ func encodeMessage(rosctr ROSCTR, pduRef uint16, param, data []byte) ([]byte, er
 	return append(out, data...), nil
 }
 
-// ParseS7Header parses an S7 header from data
+// ParseS7Header parses an S7 header from data. The second result is what
+// follows the header: the parameter and data sections, and any octets after
+// them. It is borrowed from data: copy it to keep it or to change it. It has
+// no capacity beyond its length.
 func ParseS7Header(data []byte) (*S7Header, []byte, error) {
 	if len(data) < S7HeaderSize {
 		return nil, nil, ErrShortS7Header
@@ -156,5 +159,5 @@ func ParseS7Header(data []byte) (*S7Header, []byte, error) {
 		return nil, nil, fmt.Errorf("%w: need %d, got %d", ErrS7PayloadLength, need, len(data[offset:]))
 	}
 
-	return h, data[offset:], nil
+	return h, data[offset:len(data):len(data)], nil
 }

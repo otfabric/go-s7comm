@@ -357,7 +357,8 @@ func applyProbeDefaults(req *RackSlotProbeRequest) {
 
 // runFollowUp sends a benign S7 request (SZL) on the existing conn and returns whether it succeeded.
 // pduRef is used for the request header. On success, confirmedBy is set to the strategy that worked.
-func runFollowUp(ctx context.Context, conn *cotp.Conn, pduRef uint16, strategy ConfirmationKind) (ok bool, confirmedBy ConfirmationKind, errMsg string) {
+// An answer longer than maxAnswer, the PDU size of the session, does not confirm.
+func runFollowUp(ctx context.Context, conn *cotp.Conn, pduRef uint16, strategy ConfirmationKind, maxAnswer int) (ok bool, confirmedBy ConfirmationKind, errMsg string) {
 	trySZL := func(szlID uint16) (bool, string) {
 		req := wire.EncodeSZLRequest(pduRef, szlID, 0)
 		if err := conn.WriteTSDU(ctx, req); err != nil {
@@ -366,6 +367,9 @@ func runFollowUp(ctx context.Context, conn *cotp.Conn, pduRef uint16, strategy C
 		s7Data, err := conn.ReadTSDU(ctx)
 		if err != nil {
 			return false, err.Error()
+		}
+		if len(s7Data) > maxAnswer {
+			return false, fmt.Sprintf("answer of %d bytes exceeds the negotiated PDU size %d", len(s7Data), maxAnswer)
 		}
 		hdr, rest, err := wire.ParseS7Header(s7Data)
 		if err != nil {
@@ -415,6 +419,9 @@ func runFollowUp(ctx context.Context, conn *cotp.Conn, pduRef uint16, strategy C
 		return false, ConfirmNone, "no confirmation strategy"
 	}
 }
+
+// probeMaxPDU is the PDU size a rack/slot probe proposes.
+const probeMaxPDU = 480
 
 func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) RackSlotCandidate {
 	c := RackSlotCandidate{Rack: rack, Slot: slot, Confidence: ConfidenceNone}
@@ -473,7 +480,7 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 	setupRef := uint16(1)
 	setupCtx, cancelSetup := withOptionalTimeout(ctx, req.Timeout)
 	defer cancelSetup()
-	setup, err := performS7Setup(setupCtx, conn, setupRef, 1, 1, 480)
+	setup, err := performS7Setup(setupCtx, conn, setupRef, 1, 1, probeMaxPDU)
 	if err != nil {
 		c.Stage = ProbeStageSetup
 		if isProbeTimeout(err) {
@@ -501,7 +508,7 @@ func probeOne(ctx context.Context, req RackSlotProbeRequest, rack, slot int) Rac
 	followUpRef := setupRef + 1
 	followUpCtx, cancelFollowUp := withOptionalTimeout(ctx, req.Timeout)
 	defer cancelFollowUp()
-	ok, confirmedBy, errStr := runFollowUp(followUpCtx, conn, followUpRef, req.Confirm)
+	ok, confirmedBy, errStr := runFollowUp(followUpCtx, conn, followUpRef, req.Confirm, answerLimit(setup.PDUSize, probeMaxPDU))
 	if ok {
 		c.Status = StatusValidQuery
 		c.ConfirmedBy = confirmedBy

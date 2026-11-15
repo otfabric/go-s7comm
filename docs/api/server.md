@@ -151,7 +151,7 @@ New returns a Server with no areas registered.
 func (s *Server) Close() error
 ```
 
-Close stops all listeners and closes every connection, then waits for their goroutines. It is safe to call more than once.
+Close stops all listeners and closes every connection, then waits for their goroutines: when it returns, no goroutine of an accepted connection is running or still to start. Close is safe to call more than once and from multiple goroutines; every call waits and returns nil.
 
 #### func (Server) ListenAndServe
 

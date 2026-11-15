@@ -5,9 +5,12 @@ package client
 import (
 	"context"
 	"errors"
+	"math"
+	"slices"
 	"testing"
 
 	"github.com/otfabric/go-s7comm/model"
+	"github.com/otfabric/go-s7comm/wire"
 )
 
 func TestConsolidateSpans_Empty(t *testing.T) {
@@ -175,5 +178,106 @@ func TestProbeReadableRanges_RequiresConnectedClient(t *testing.T) {
 	}
 	if err != nil && !errors.Is(err, ErrNotConnected) {
 		t.Errorf("expected ErrNotConnected, got %v", err)
+	}
+}
+
+// The scanned range lies inside the S7 byte address space: a request
+// outside it returns a ValidationError before any offset is built or
+// anything is sent, whatever its step.
+func TestProbeReadableRanges_RangeBounds(t *testing.T) {
+	const limit = wire.MaxS7AnyByteOffset + 1 // one past the last byte address
+	c := New("127.0.0.1")                     // never connected: validation comes first
+	for _, tc := range []struct {
+		name             string
+		start, end, step int
+		valid            bool
+	}{
+		{"empty at 0", 0, 0, 1, true},
+		{"first byte", 0, 1, 1, true},
+		{"last byte", limit - 1, limit, 1, true},
+		{"empty at the end", limit, limit, 1, true},
+		{"whole space, one probe", 0, limit, limit, true},
+		{"step larger than any range", 8, 16, math.MaxInt, true},
+		{"start -1", -1, 8, 1, false},
+		{"start -16", -16, 0, 8, false},
+		{"start most negative", math.MinInt, 0, 1, false},
+		{"end one past the space", 0, limit + 1, 1, false},
+		{"start past the space", limit + 1, limit + 1, 1, false},
+		{"end at the 32-bit boundary", 0, math.MaxInt32, math.MaxInt32, false},
+		{"end largest int", 0, math.MaxInt, 1, false},
+		{"end largest int, large step", 8, math.MaxInt, math.MaxInt - 1, false},
+		{"start after end", 16, 8, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := RangeProbeRequest{Area: model.AreaMerkers, Start: tc.start, End: tc.end, Step: tc.step, ProbeSize: 1}
+			var res *RangeProbeResult
+			var err error
+			allocated := allocatedBy(func() { res, err = c.ProbeReadableRanges(context.Background(), req) })
+			var ve *ValidationError
+			if !tc.valid {
+				if !errors.As(err, &ve) || res != nil {
+					t.Fatalf("err = %v, want *ValidationError and no result", err)
+				}
+				if allocated > 4096 {
+					t.Errorf("allocated %d bytes for a refused range, budget 4096", allocated)
+				}
+				return
+			}
+			if errors.As(err, &ve) {
+				t.Fatalf("a range inside the address space was refused: %v", err)
+			}
+			// Not connected: an empty range returns an empty result, any
+			// other one stops at the connection check.
+			if tc.start == tc.end {
+				if err != nil || res == nil || len(res.Probes) != 0 {
+					t.Fatalf("empty range: %+v, %v", res, err)
+				}
+			} else if !errors.Is(err, ErrNotConnected) {
+				t.Fatalf("err = %v, want ErrNotConnected", err)
+			}
+		})
+	}
+}
+
+// Offsets run from Start in steps of Step and stay below End, up to the last
+// byte address and for a step that no int sum could hold.
+func TestProbeReadableRanges_Offsets(t *testing.T) {
+	const limit = wire.MaxS7AnyByteOffset + 1
+	port, cleanup := startFakeBitServer(t, func(ref uint16, req []byte) []byte {
+		return readVarAnswer(ref, []byte{0x5A})
+	})
+	defer cleanup()
+	c := New("127.0.0.1", WithRackSlot(0, 1), WithPort(port))
+	if err := c.Connect(testContext(t)); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	for _, tc := range []struct {
+		start, end, step int
+		want             []int
+	}{
+		{0, 4, 1, []int{0, 1, 2, 3}},
+		{1, 10, 4, []int{1, 5, 9}},
+		{0, 9, 4, []int{0, 4, 8}},
+		{limit - 3, limit, 2, []int{limit - 3, limit - 1}},
+		{8, 16, math.MaxInt, []int{8}},
+		{8, 16, 0, []int{8, 9, 10, 11, 12, 13, 14, 15}}, // step 0: the probe size
+	} {
+		res, err := c.ProbeReadableRanges(testContext(t), RangeProbeRequest{
+			Area: model.AreaMerkers, Start: tc.start, End: tc.end, Step: tc.step, ProbeSize: 1,
+		})
+		if err != nil {
+			t.Fatalf("[%d,%d) step %d: %v", tc.start, tc.end, tc.step, err)
+		}
+		var got []int
+		for _, p := range res.Probes {
+			got = append(got, p.Offset)
+			if p.Result.Status != ReadStatusSuccess || p.Request.Start != p.Offset {
+				t.Errorf("[%d,%d) step %d: probe at %d: status %s, request %+v", tc.start, tc.end, tc.step, p.Offset, p.Result.Status, p.Request)
+			}
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("[%d,%d) step %d: offsets %v, want %v", tc.start, tc.end, tc.step, got, tc.want)
+		}
 	}
 }

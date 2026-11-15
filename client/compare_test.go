@@ -254,26 +254,33 @@ func TestCompareRead_DifferentData(t *testing.T) {
 	}
 }
 
-func BenchmarkCompareReadManyCandidates(b *testing.B) {
-	ctx := context.Background()
+// BenchmarkE2ECompareReadManyCandidates reads 8 bytes through each of 20
+// rack/slot candidates, four at a time: per candidate a connect, one read
+// and the close, against an in-process peer (pipePeers) through
+// CompareReadRequest.Dialer. No socket is involved.
+func BenchmarkE2ECompareReadManyCandidates(b *testing.B) {
+	peers := &pipePeers{op: answerReadsAndSZL}
+	defer peers.wait()
 	candidates := make([]RackSlot, 20)
 	for i := range candidates {
 		candidates[i] = RackSlot{Rack: 0, Slot: i % 4}
 	}
 	req := CompareReadRequest{
-		Address:     "127.0.0.1",
-		Port:        7,
+		Address:     "192.0.2.1",
 		Candidates:  candidates,
 		Area:        model.AreaDB,
 		DBNumber:    1,
 		Offset:      0,
 		Size:        8,
-		Timeout:     5 * time.Millisecond,
 		Parallelism: 4,
+		Dialer:      peers.dial,
 	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = CompareRead(ctx, req)
+	b.ReportAllocs()
+	for b.Loop() {
+		result, err := CompareRead(context.Background(), req)
+		if err != nil || len(result.ByCandidate) != 20 || !result.RackSlotInsensitive {
+			b.Fatalf("CompareRead = %+v, %v", result, err)
+		}
 	}
 }
 

@@ -14,7 +14,9 @@ What go-s7comm does not do, or does only partly. API behaviour is in [API.md](AP
 ## Behaviour to plan for
 
 - `WithTimeout` bounds `Connect`, not later reads and writes: without a context deadline or cancel, open-session I/O can block indefinitely.
-- Cancelling during I/O typically aborts the COTP session; reconnect afterwards.
+- A call whose context ends after its request was sent, and a transport failure during a call, end the session: the client closes the connection, and later calls return `ErrNotConnected` until `Connect` succeeds again ([ERRORS.md](ERRORS.md#context-reconnect-and-concurrency)). There is no automatic reconnect.
+- `Close` waits for the operation in flight on the client; it does not end a blocked call. Cancel the call's context for that.
+- A `Logger` or `Dialer` must not call an operation, `Connect` or `Close` of the client it is set on: it runs while the client holds its request lock, and such a call does not return. `ConnectionInfo` and `PDUSize` may be called.
 - Protocol operations are serialised per client; `RangeProbeRequest.Parallelism` gives no wire-level concurrency.
 
 ## Verification

@@ -3,7 +3,9 @@
 package wire
 
 import (
+	"bytes"
 	"encoding/binary"
+	"errors"
 	"testing"
 )
 
@@ -141,18 +143,82 @@ func TestFunctionCodeString(t *testing.T) {
 	}
 }
 
+// BenchmarkParseS7Header decodes the header of a recorded request and of a
+// recorded answer (testdata/captures): a job has 10 header octets, an
+// Ack-Data 12.
 func BenchmarkParseS7Header(b *testing.B) {
-	h := must(EncodeS7Header(ROSCTRJob, 7, 12, 4))
-	h = append(h, make([]byte, 16)...)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _, _ = ParseS7Header(h)
+	answer := recordedReadAnswer(b, 19)
+	request := seedPDUs(b, 1, func(p recordedPDU) bool { return p.fromClient && p.header.ROSCTR.IsJob() })[0]
+	for _, tc := range []struct {
+		name string
+		pdu  []byte
+	}{{"job", request.pdu}, {"ack_data", answer.pdu}} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			var h *S7Header
+			var rest []byte
+			for b.Loop() {
+				var err error
+				if h, rest, err = ParseS7Header(tc.pdu); err != nil {
+					b.Fatal(err)
+				}
+			}
+			if int(h.ParamLength)+int(h.DataLength) != len(rest) {
+				b.Fatalf("sections of %d octets, %d after the header", int(h.ParamLength)+int(h.DataLength), len(rest))
+			}
+		})
 	}
 }
 
+// FuzzParseS7Header: an accepted header holds the input's fields, what
+// follows it is a view of the input that covers the declared sections, the
+// header encodes back to the same octets, and one octet less than the
+// header and its sections is refused. A refusal is one of the four
+// documented errors and returns nothing.
 func FuzzParseS7Header(f *testing.F) {
 	f.Add([]byte{0x32, 0x01, 0, 0, 0, 0, 0, 0, 0, 0})
+	f.Add([]byte{0x32, 0x03, 0, 0, 0, 1, 0, 2, 0, 1, 0, 0, FuncWriteVar, 1, RetCodeSuccess})
+	types := map[ROSCTR]int{}
+	for _, p := range seedPDUs(f, 12, func(p recordedPDU) bool { types[p.header.ROSCTR]++; return types[p.header.ROSCTR] <= 3 }) {
+		f.Add(p.pdu)
+	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _, _ = ParseS7Header(data)
+		h, rest, err := ParseS7Header(data)
+		if err != nil {
+			if h != nil || rest != nil {
+				t.Fatalf("a refused header returned %+v and %d octets", h, len(rest))
+			}
+			if !errors.Is(err, ErrShortS7Header) && !errors.Is(err, ErrInvalidS7ProtocolID) &&
+				!errors.Is(err, ErrShortS7AckHeader) && !errors.Is(err, ErrS7PayloadLength) {
+				t.Fatalf("undocumented error: %v", err)
+			}
+			return
+		}
+		headerLen := S7HeaderSize
+		if h.ROSCTR.IsAck() || h.ROSCTR.IsAckData() {
+			headerLen = AckDataHeaderSize
+			if h.ErrorClass != data[10] || h.ErrorCode != data[11] {
+				t.Fatalf("error class and code %#x %#x, input holds %#x %#x", h.ErrorClass, h.ErrorCode, data[10], data[11])
+			}
+		} else if h.ErrorClass != 0 || h.ErrorCode != 0 {
+			t.Fatalf("error class and code set on a PDU of type %#x", byte(h.ROSCTR))
+		}
+		need := int(h.ParamLength) + int(h.DataLength)
+		if off, ok := within(data, rest); !ok || (len(rest) > 0 && off != headerLen) ||
+			len(rest) != len(data)-headerLen || cap(rest) != len(rest) || need > len(rest) {
+			t.Fatalf("%d octets after a %d-octet header of a %d-octet input, sections of %d", len(rest), headerLen, len(data), need)
+		}
+		if h.ProtocolID != 0x32 || byte(h.ROSCTR) != data[1] ||
+			h.RedundancyID != binary.BigEndian.Uint16(data[2:4]) || h.PDURef != binary.BigEndian.Uint16(data[4:6]) ||
+			h.ParamLength != binary.BigEndian.Uint16(data[6:8]) || h.DataLength != binary.BigEndian.Uint16(data[8:10]) {
+			t.Fatalf("header %+v does not hold the fields of % x", h, data[:10])
+		}
+		enc, err := EncodeS7Header(h.ROSCTR, h.PDURef, int(h.ParamLength), int(h.DataLength))
+		if err != nil || !bytes.Equal(enc[:2], data[:2]) || !bytes.Equal(enc[4:], data[4:10]) {
+			t.Fatalf("header encodes to % x (%v), input % x", enc, err, data[:10])
+		}
+		if _, _, err := ParseS7Header(data[:headerLen+need-1]); err == nil {
+			t.Fatalf("accepted with one octet less than its header and sections (%d)", headerLen+need)
+		}
 	})
 }

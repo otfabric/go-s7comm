@@ -3,7 +3,8 @@ run-name: "Extended (${{ github.event_name }}) on ${{ github.ref_name }}"
 
 # What is too long for every push: each fuzz target for minutes, not seconds.
 # One job per target, so the time per target sets each job's length and a new
-# target never pushes the run past a job timeout.
+# target never pushes the run past a job timeout. And the tests on a 32-bit
+# architecture.
 
 on:
   schedule:
@@ -66,3 +67,33 @@ jobs:
           name: fuzz-failures-${{ strategy.job-index }}-${{ matrix.target }}
           path: "**/testdata/fuzz/"
           if-no-files-found: ignore
+
+  # Platform width (otfabric/engineering standards/testing.md#platform-width):
+  # the decoders convert wire integers to int, so the tests also run where int
+  # has 32 bits. ubuntu runners execute 386 binaries; the race detector does
+  # not exist for 386.
+  test-386:
+    name: Tests on a 32-bit architecture
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: Tests on a 32-bit architecture
+        run: GOARCH=386 go test -count=1 ./...
+
+  # Every benchmark runs once, so one that no longer builds or fails its own
+  # checks is seen the next night. Timings are not compared here.
+  bench-smoke:
+    name: Benchmarks run once
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: Benchmarks run once
+        run: make bench-smoke

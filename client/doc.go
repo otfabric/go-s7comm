@@ -95,29 +95,37 @@
 //
 // # Retry and resilience
 //
-// Retry semantics differ by API: UploadBlock retries failed chunk reads (transient
-// errors only; protocol/parse failures fail fast). Range probes support Retries and
-// Repeat for stability. ReadArea, WriteArea, and CompareRead have no built-in retry;
-// callers can wrap calls in their own backoff/retry if needed.
+// No request is repeated by the client: ReadArea, WriteArea, CompareRead and
+// UploadBlock (one request per segment) return the first failure. Range probes
+// support Retries and Repeat for stability. Callers can wrap calls in their own
+// backoff/retry if needed. A call that is given up after its request was sent
+// (its context ended, or the transport failed) ends the session, so a retry
+// starts with Connect.
 //
 // # Concurrency
 //
 // Concurrent use is safe, but all protocol operations are serialized per client instance.
 // Only one request or connection transition is in flight at a time; long operations
 // (e.g. UploadBlock) block other reads and writes on that client. Typical use:
-// Connect once, perform operations, then Close. Calling methods after Close may
-// return ErrNotConnected or transport errors.
+// Connect once, perform operations, then Close. Calling methods after Close
+// returns ErrNotConnected. Close is safe to call more than once and from
+// multiple goroutines; it waits for the operation in flight and does not
+// interrupt it. A Logger and a Dialer run while an operation is in flight:
+// they may call ConnectionInfo and PDUSize, and must not call an operation,
+// Connect or Close of the same client.
 //
 // # Reconnection
 //
 // Reconnecting after transport failure or intentional Close is supported: call
-// Close() then Connect(ctx) again. The client does not auto-reconnect; callers
-// must call Connect after Close to resume use.
+// Connect(ctx) again. The client does not auto-reconnect. A transport failure,
+// and a call whose context ends after its request was sent, end the session
+// (see Connect): calls then return ErrNotConnected until Connect succeeds.
 //
 // # Negotiated PDU size
 //
 // ConnectionInfo() is the canonical source for negotiated connection state; ConnectionInfo().PDUSize
 // is the negotiated maximum S7 PDU payload length (bytes). PDUSize() is a shorthand for it.
 // All request sizing and chunk planning use this value; sendReceive rejects any request whose
-// S7 payload length exceeds it.
+// S7 payload length exceeds it, and any answer longer than it. It is never above the size
+// proposed with WithMaxPDU. SECURITY.md lists every limit on what a peer can send.
 package client

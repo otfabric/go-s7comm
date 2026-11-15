@@ -5,7 +5,9 @@ package capture
 import (
 	"encoding/binary"
 	"errors"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -319,8 +321,58 @@ func TestIgnoredFrames(t *testing.T) {
 	}
 }
 
+// FuzzRead: a file that is read yields S7 PDUs only (each starts with the
+// protocol ID), numbered by a frame of the file and ordered by it; the PDUs
+// together are no longer than the file; the counters are not negative; and
+// reading the same bytes again gives the same conversations. A refused file
+// yields nothing.
 func FuzzRead(f *testing.F) {
 	f.Add(pcapFile(binary.LittleEndian, 1, up(1, dt(true, s7)).frame()))
 	f.Add(pcapngFile(binary.BigEndian, down(1, dt(true, s7)).frame()))
-	f.Fuzz(func(t *testing.T, b []byte) { _, _ = Read(b) })
+	f.Add(pcapFile(binary.BigEndian, 1, up(1, dt(false, s7[:4])).frame(), up(12, dt(true, s7[4:])).frame(), down(1, dt(true, s7)).frame()))
+	f.Add(pcapFile(binary.LittleEndian, 1, up(1, dt(true, []byte{0x72, 0x01, 0x02})).frame())) // a TSDU that is not an S7 PDU
+	for _, name := range []string{                                                             // the smallest recordings of real CPUs
+		"gymgit/snap7_s7-300_setup-communication.pcapng",
+		"gymgit/snap7_s7-300_read-var.pcapng",
+		"gymgit/step7-v5.5_s7-300_plc-stop.pcapng",
+	} {
+		b, err := os.ReadFile(filepath.Join("../../testdata/captures", name))
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(b)
+	}
+	f.Fuzz(func(t *testing.T, b []byte) {
+		convs, err := Read(b)
+		if err != nil {
+			if convs != nil {
+				t.Fatalf("a refused file returned %d conversations", len(convs))
+			}
+			return
+		}
+		total := 0
+		for _, c := range convs {
+			if c.Client == "" || c.Server == "" || c.ConnectRequests < 0 || c.ConnectConfirms < 0 || c.Gaps < 0 || c.Dropped < 0 {
+				t.Fatalf("conversation %+v", c)
+			}
+			last := 0
+			for _, p := range c.PDUs {
+				if len(p.Data) == 0 || p.Data[0] != 0x32 {
+					t.Fatalf("PDU % x does not start with the S7 protocol ID", p.Data)
+				}
+				if p.Frame < 1 || p.Frame > len(b) || p.Frame < last {
+					t.Fatalf("PDU of frame %d after frame %d in a file of %d octets", p.Frame, last, len(b))
+				}
+				last = p.Frame
+				total += len(p.Data)
+			}
+		}
+		if total > len(b) {
+			t.Fatalf("PDUs of %d octets from a file of %d", total, len(b))
+		}
+		again, err := Read(b)
+		if err != nil || !reflect.DeepEqual(again, convs) {
+			t.Fatalf("a second read of the same bytes differs: %v", err)
+		}
+	})
 }

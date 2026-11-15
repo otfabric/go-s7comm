@@ -110,7 +110,12 @@ func newHarness(t *testing.T) *harness {
 	}
 	if managed {
 		if _, err := exec.LookPath("docker"); err != nil {
-			t.Skip("docker not available; set SNAP_INTEROP_MANAGED=0 to use external servers")
+			// make interop and the Interop workflow set SNAP_INTEROP_REQUIRE_DOCKER=1:
+			// there the matrix must run, so a host without Docker fails instead of skipping.
+			if os.Getenv("SNAP_INTEROP_REQUIRE_DOCKER") == "1" {
+				t.Fatalf("docker not available and SNAP_INTEROP_REQUIRE_DOCKER=1: %v", err)
+			}
+			t.Skip("docker not available; set SNAP_INTEROP_MANAGED=0 to use external servers, or SNAP_INTEROP_REQUIRE_DOCKER=1 to fail instead of skipping")
 		}
 		for i := range h.servers {
 			img := getenv(h.servers[i].ImageEnv, h.servers[i].DefaultImage)

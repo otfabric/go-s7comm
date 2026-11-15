@@ -36,9 +36,10 @@ The root package holds documentation only. Applications import the subpackages.
 
 A `Client` owns one `*cotp.Conn`. Its options do not change after `New`.
 
-- `reqMu` serialises protocol operations, so one request/response exchange runs at a time on a client. `Connect` and `Close` take it too. As a result `RangeProbeRequest.Parallelism` gives no wire-level concurrency.
+- `reqMu` serialises protocol operations, so one request/response exchange runs at a time on a client. `Connect` and `Close` take it too: `Close` waits for the operation in flight and does not interrupt it. A `Logger` and a `Dialer` are called with it held. As a result `RangeProbeRequest.Parallelism` gives no wire-level concurrency.
 - `mu` guards the session fields (`conn`, rack, slot, TSAPs, PDU size) for readers such as `ConnectionInfo` and `PDUSize`.
 - A repeated `Connect` replaces the session only after the new handshake succeeds.
+- An exchange that is given up after its request was sent (its context ended, or the transport failed) closes the connection and clears the session fields under `mu`. Answers are matched to requests by their order on the connection and checked by PDU reference, so a connection with an answer still to come is not used again.
 
 A `Client` starts no goroutine of its own. Goroutines exist only in the multi-target functions, and each of these waits for its workers before returning:
 
@@ -50,7 +51,7 @@ A `Client` starts no goroutine of its own. Goroutines exist only in the multi-ta
 
 Context behaviour, including why cancelling during I/O aborts the session, is in [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
 
-A `server.Server` runs one goroutine per accepted connection, bounded by `MaxConnections`, plus the caller's `Serve`. One `sync.RWMutex` guards every area: a Read Var job holds it for reading, a Write Var job for writing, so a multi-item job is one step. `Close` closes listeners and connections and waits for every connection goroutine.
+A `server.Server` runs one goroutine per accepted connection, bounded by `MaxConnections`, plus the caller's `Serve`. One `sync.RWMutex` guards every area: a Read Var job holds it for reading, a Write Var job for writing, so a multi-item job is one step. `Close` closes listeners and connections and waits for every connection goroutine: a connection is counted in the server's `sync.WaitGroup` under the lock that registers it, so `Close` also waits for one whose goroutine has not started yet.
 
 ## Platform backends
 

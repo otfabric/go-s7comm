@@ -50,8 +50,9 @@ Full guide (statuses, sentinels, wire `S7Error`, CLI exit-code contract): **[ERR
 
 **Context:** cancel without a deadline **is** effective on TCP dial (with a
 custom `WithDialer`, only if it honours the context) and go-cotp
-TSDU I/O (via go-cotp’s deadline watcher), but mid-I/O cancel typically **aborts**
-the COTP session — reconnect afterward. Prefer `context.WithTimeout` /
+TSDU I/O (via go-cotp’s deadline watcher). A call whose context ends after its
+request was sent **ends the session**: later calls return `ErrNotConnected`
+until `Connect` is called again. Prefer `context.WithTimeout` /
 `WithDeadline` for wall-clock bounds. Client `WithTimeout` bounds **Connect**
 (and dial), not ongoing PDU reads/writes; without cancel and without a deadline,
 open-session I/O can block indefinitely. `UploadBlock` cleanup uses a separate
@@ -293,6 +294,7 @@ Useful targets:
 - `make fuzz` — run every fuzz target (`FUZZTIME`, default 10s)
 - `make cross` — cross-compile without cgo
 - `make bench` — run benchmarks (discovery, probe, compare, wire parsers)
+- `make bench-smoke` — run every benchmark once, as the nightly workflow does
 - `make lint` — staticcheck
 - `make lint-ci` — golangci-lint
 - `make vuln` — govulncheck

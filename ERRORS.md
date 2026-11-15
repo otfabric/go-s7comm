@@ -21,13 +21,15 @@ Current release: **v0.7.5** (see [RELEASE.md](RELEASE.md)).
 
 | Situation | How it is reported |
 |-----------|--------------------|
-| Invalid caller input (address, options, CIDR, block number, …) | Top-level `error`: `*client.ValidationError` |
+| Invalid caller input (address, options, CIDR, block number, range of a scan, …) | Top-level `error`: `*client.ValidationError` |
 | Byte read remote outcome (success / short / empty / rejected / timeout / …) | `(*ReadResult, nil)` — inspect `Status` / `result.Err()` |
 | Bit read/write, byte write, Connect, Upload, GetCPUState, … | Strict top-level `error` |
 | Best-effort ops (Identify, GetBlockInfo, ListAllBlocks, ReadDiagBuffer) | May return `(value, error)` both non-nil (partial result) |
 | Not connected | `client.ErrNotConnected` (on reads: usually inside `ReadResult.Cause`) |
 | Request larger than negotiated PDU | `client.ErrRequestExceedsPDU` |
 | Malformed protocol framing | Often wraps `client.ErrProtocolFailure` |
+| An answer longer than the negotiated PDU size, of a message type that does not answer the request, of another user data function, or of another SZL list | Wraps `client.ErrProtocolFailure`; the session stays open |
+| A call given up after its request was sent (context ended, transport failed) | The context or transport error; the session ends and later calls return `client.ErrNotConnected` |
 | PLC header / item reject | `*wire.S7Error` (on reads: `ReadStatusRejected` + `ReturnCode`) |
 
 Prefer:
@@ -113,7 +115,7 @@ func (r *ReadResult) Err() error    // nil | ErrNilReadResult | *ReadOutcomeErro
 
 | Symbol | Kind | Notes |
 |--------|------|--------|
-| `ErrNotConnected` | sentinel | No active session |
+| `ErrNotConnected` | sentinel | No active session: before `Connect`, after `Close`, and after a call that ended the session (see [Context, reconnect, and concurrency](#context-reconnect-and-concurrency)) |
 | `ErrRequestExceedsPDU` | sentinel | Request size > negotiated PDU |
 | `ErrProtocolFailure` | sentinel | Advanced/diagnostic; often wrapped on handshake/`sendReceive`/bit decode failures |
 | `ErrNilReadResult` | sentinel | `(*ReadResult)(nil).Err()` |
@@ -140,6 +142,7 @@ type S7Error struct {
 - Header errors: `Class` / `Code` from the S7 ack header (`NewS7Error`, `NewS7ErrorWithParam`).
 - Item rejects: often `Code` = item return code via `ReturnCodeError` (e.g. address fault `0x05`).
 - Some parse failures use Message-only `S7Error` (no Class/Code).
+- User data refusals (SZL reads, block functions): `Code` is the item return code of the data section, as for a read (`0x0A` when the list or block does not exist). When the parameter section carries an error code as well, the message names it: a recorded CPU 315-2 PN/DP refuses an SZL list with `0xD402` and a block with `0xD209`, each with return code `0x0A`, and `GetBlockInfo` for that block returns `Code` `0x0A` with the message `object not available (parameter error 0xD209: one of the given blocks not found on module)`. An error code on an answer whose data section does not report a refusal is returned with `Class` its high byte and `Code` its low byte, and the data is not used.
 
 Helpers: `HeaderErrorString`, `ItemReturnCodeString`, `ErrClassString`, `ParamErrorFromParam`, `ParamErrorCodeString`.
 
@@ -245,8 +248,22 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
 - **Cancel without deadline** is effective on TCP dial (with a custom `Dialer`,
   only if it honors `ctx`) and go-cotp `WriteTSDU` /
   `ReadTSDU` (go-cotp arms a watcher that forces a past deadline on `ctx.Done`).
-  Mid-I/O cancel usually **aborts** the COTP connection — treat the client as
-  disconnected and call `Connect` again.
+- **A call that is given up after its request was sent ends the session.** When
+  the context of a call ends (cancel or deadline) once the request has been
+  sent, or the transport fails during the exchange, the client closes the
+  connection and clears the session. The call returns its context or transport
+  error; `ConnectionInfo()` and `PDUSize()` then report zero values; every
+  later call returns `ErrNotConnected` (reads: status `transport-error`) and
+  sends nothing, until `Connect` succeeds again. The reason is the protocol:
+  answers come back in order on the one connection, so the answer to the
+  request that was given up would be the first thing the next call reads.
+  go-cotp itself keeps a connection open when a context ends a read before
+  any octet arrived, which is why the client ends the session.
+- A context that has already ended when a call starts sends nothing and leaves
+  the session as it is. An answer that arrives and is refused (another PDU
+  reference, a message type that does not answer the request, a length above
+  the negotiated PDU size, content that does not decode) also leaves it open:
+  the stream is still aligned, and the next call is answered.
 - Prefer `context.WithTimeout` / `WithDeadline` for wall-clock bounds on an
   operation. Client option `WithTimeout` applies to **Connect**/dial (and is
   wrapped into the COTP and S7 setup contexts); it does **not** automatically bound later
@@ -264,9 +281,19 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
   auto rack/slot attempts honor `ctx.Err()` / `ctx.Done()`.
 - `UploadBlock` end-upload cleanup uses `context.WithTimeout(context.Background(), 500ms)`
   and ignores the caller context (best-effort; cleanup errors are logged only).
+  When the upload ended the session, the cleanup sends nothing.
+- `UploadBlock` asks for each segment once. A failure on a segment ends the
+  upload; the request is not repeated, because the CPU answers each request
+  with the next segment.
 - A second `Connect()` replaces the session only after the new handshake succeeds;
   a failed reconnect does not drop a healthy session.
-- The client does not auto-reconnect; after `Close` or transport failure, call
-  `Connect` again.
+- The client does not auto-reconnect; after `Close`, a call that ended the
+  session or a transport failure, call `Connect` again.
 - Concurrent use is safe, but protocol ops are serialized per client (`reqMu`);
   long ops (e.g. `UploadBlock`) block other requests on that client.
+- `Close` is safe to call more than once and from multiple goroutines. It
+  takes the same lock, so it waits for the operation in flight and does not
+  interrupt it: to end a blocked call, cancel its context. A `Logger` and a
+  `Dialer` run while that lock is held: they may call `ConnectionInfo` and
+  `PDUSize`; an operation, `Connect` or `Close` of the same client called from
+  one of them does not return.

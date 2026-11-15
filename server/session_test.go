@@ -337,3 +337,46 @@ func TestMemoryAPIErrors(t *testing.T) {
 }
 
 func readErr(_ []byte, err error) error { return err }
+
+// The server owns its memory: RegisterDB and RegisterArea copy what they are
+// given, Read returns a copy and Write copies its argument. A caller that
+// changes one of those slices afterwards changes nothing in the server.
+func TestMemoryIsNotSharedWithTheCaller(t *testing.T) {
+	srv, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := []byte{1, 2, 3, 4}
+	given := bytes.Clone(first)
+	if err := srv.RegisterDB(1, given, AreaOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	markers := bytes.Clone(first)
+	if err := srv.RegisterArea(AreaMerkers, markers, AreaOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range given {
+		given[i], markers[i] = 0xEE, 0xEE
+	}
+	for _, area := range []Area{AreaDB, AreaMerkers} {
+		got, err := srv.Read(area, 1, 0, 4)
+		if err != nil || !bytes.Equal(got, first) {
+			t.Fatalf("area %v after the registered slice changed: % x, %v; want % x", area, got, err, first)
+		}
+		for i := range got {
+			got[i] = 0xDD
+		}
+		_ = append(got[:0], bytes.Repeat([]byte{0xDD}, 64)...)
+		if again, err := srv.Read(area, 1, 0, 4); err != nil || !bytes.Equal(again, first) {
+			t.Fatalf("area %v after a Read result changed: % x, %v; want % x", area, again, err, first)
+		}
+	}
+	written := []byte{9, 8}
+	if err := srv.Write(AreaDB, 1, 1, written); err != nil {
+		t.Fatal(err)
+	}
+	written[0], written[1] = 0xCC, 0xCC
+	if got, err := srv.Read(AreaDB, 1, 0, 4); err != nil || !bytes.Equal(got, []byte{1, 9, 8, 4}) {
+		t.Fatalf("after the written slice changed: % x, %v", got, err)
+	}
+}

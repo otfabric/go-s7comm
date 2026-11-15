@@ -100,9 +100,17 @@ func validateCompareReadRequest(req CompareReadRequest) error {
 }
 
 // validateRangeProbeRequest checks RangeProbeRequest fields. Returns an error for invalid input.
+// The range [Start, End) must lie inside the S7ANY address space, so every
+// offset of a scan is one a read can address.
 func validateRangeProbeRequest(req RangeProbeRequest) error {
+	if req.Start < 0 {
+		return &ValidationError{Message: fmt.Sprintf("start must be >= 0, got %d", req.Start)}
+	}
 	if req.Start > req.End {
 		return &ValidationError{Message: fmt.Sprintf("start must be <= end, got start=%d end=%d", req.Start, req.End)}
+	}
+	if req.End > wire.MaxS7AnyByteOffset+1 {
+		return &ValidationError{Message: fmt.Sprintf("end must be <= %d, one past the last S7 byte address, got %d", wire.MaxS7AnyByteOffset+1, req.End)}
 	}
 	if req.Area == model.AreaDB && req.DBNumber < 0 {
 		return &ValidationError{Message: fmt.Sprintf("DB number must be >= 0, got %d", req.DBNumber)}

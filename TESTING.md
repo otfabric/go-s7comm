@@ -9,9 +9,10 @@
 | Coverage gate | `make coverage-check` | none | `ci.yml` (go-ci `coverage-min`) |
 | Per-package coverage floor | `make coverage-pkg-check` | none | `ci.yml` (`Per-package coverage`) |
 | Fuzz | `make fuzz` (`FUZZTIME`, default 10s per target) | none | `ci.yml` (go-ci `fuzz-time: 10s`); `extended.yml`, nightly, 5 minutes per target, one job per target |
-| Benchmarks | `make bench` | none | not run |
+| Benchmarks | `make bench`; `make bench-smoke` runs each once | none | `extended.yml` (`Benchmarks run once`, nightly): `make bench-smoke`, so a benchmark that no longer runs is seen the next night. Timings are not compared |
 | Cross-compilation | `make cross` | none | not run |
-| Interoperability | `make interop` | Docker, ports 1102 and 2102 free | `interop.yml`, every pull request |
+| 32-bit architecture | `GOARCH=386 go test -count=1 ./...` | a host that runs linux/386 binaries (linux/amd64 does) | `extended.yml`, nightly (`Tests on a 32-bit architecture`), without the race detector, which 386 does not have |
+| Interoperability | `make interop` | Docker, ports 1102 and 2102 free; without Docker it fails (`SNAP_INTEROP_REQUIRE_DOCKER=1`) | `interop.yml`, every pull request |
 | Recorded traffic of real CPUs | part of `make test` | none; the captures are in `testdata/captures` | `ci.yml` (go-ci) |
 
 `make check` runs formatting, both linters, govulncheck, vet (including a compile of `interop/`), `test` and `coverage-pkg-check`. It does not start Docker.
@@ -34,6 +35,31 @@ CI runs on Linux only. See [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md#platf
 - `client`: `TestCaptureReplay*` replays a capture as a server. A request is answered only if a real client sent the same bytes, so a request built differently fails the test. The results (Identify, CPU state, protection, diagnostic buffer, block counts, lists and info, an SDB upload) are compared with Snap7's log of the session and Wireshark's decode.
 - `server`: `TestCaptureReplayMatchesRealCPUs` sends every recorded Setup Communication, Read Var and Write Var job to a server holding the memory the CPU reported (read-only where the CPU refused a write to a DB with `0x03`), and compares the answers byte for byte; all are identical. `wire` parses WinCC's 84 DBREAD requests to the S7-400, and three of them are parser fixtures and fuzz seeds.
 
+## Lifecycle contract matrix
+
+The rows are those of the organisation's lifecycle standard (otfabric/engineering `standards/lifecycle.md`, L1 to L16), for the two long-lived types of this module. `client.Client` owns one go-cotp connection and starts no goroutine; it has no reconnect loop, no queue and no event callbacks. `server.Server` owns listeners and one goroutine per connection. A row that cannot apply says n/a with the reason. The client tests are in `client/session_test.go`, the server tests in `server/lifecycle_test.go`, unless another file is named.
+
+| Row | `client.Client` | `server.Server` |
+|---|---|---|
+| L1 Close twice | `TestClose_IsIdempotentAndEndsSession`, `TestCloseClearsConnection`: the second `Close` returns nil, the session is cleared, the next call returns `ErrNotConnected` | `TestServeAfterClose`: a second `Close` returns nil, and `Serve` on the closed server returns `ErrServerClosed` and closes its listener |
+| L2 Two goroutines call Close | `TestCloseFromSeveralGoroutines`: four calls return nil and the connection is closed once | `TestCloseFromSeveralGoroutines`: four calls return nil after the server has stopped |
+| L3 Close during a blocked read | By design `Close` waits for the call in flight and does not end it ([ARCHITECTURE.md](ARCHITECTURE.md#concurrency-and-ownership)); the call ends by its context. `TestCloseWaitsForTheCallInFlight`: the call returns `context.Canceled`, then `Close` returns nil, the connection is closed once and the client is disconnected. Ending the call from `Close` changes what callers see and is left to a minor release | `TestCloseDuringABlockedRead`: `Close` returns with the connection's goroutine gone, and the client's read fails. `TestCloseEndsOpenConnections` does the same over TCP |
+| L4 Close during a write | As L3: a call is one write and one read under the same lock, and its context bounds the write | `TestCloseDuringAWriteTheClientDoesNotTake`: `Close` ends a write that nobody reads. `TestIdleTimeoutCoversUnreadAnswers` covers `IdleTimeout` |
+| L5 Close during handshake | `TestCloseDuringConnectWaitsAndDisconnects`: `Close` waits for `Connect`, which `WithTimeout` bounds; `Connect` returns nil, then `Close` ends the new session and the connection is closed once | `TestCloseDuringTheHandshake`: `Close` ends a connection that is still in its COTP handshake, without waiting for `HandshakeTimeout` |
+| L6 Cancel a pending request | `TestCancelAfterRequestSentEndsTheSession` (read, write, bit read, user data, upload): the call returns `context.Canceled`. The documented outcome is that the session ends ([ERRORS.md](ERRORS.md#context-reconnect-and-concurrency)): the next call returns `ErrNotConnected` and sends nothing. `TestContextEndedBeforeRequestKeepsTheSession`: a context that had already ended sends nothing, and the next call is answered on the same session | n/a: the server sends no requests |
+| L7 Response after the request timed out | `TestLateAnswerEndsTheSession`: the session ended with the timeout, so the late answer reaches a closed connection and completes no request; the next call returns `ErrNotConnected`, never `PDURefMismatchError`, and after `Connect` the client reads again. `TestProbeReadableRangesStopsAskingAfterATimeout` shows the same for a range scan. Late answers are not counted: the client has no metrics surface ([OBSERVABILITY.md](OBSERVABILITY.md)) | n/a |
+| L8 Response after reconnect | n/a as a loop: there is no automatic reconnect. A repeated `Connect` opens a new connection and closes the old one (`TestConnect_FailedReconnectKeepsSession`, e2e `TestReconnectAfterConnectionLoss`), so an answer on the old connection cannot reach the new session | n/a |
+| L9 Callback calls a public method | `TestCallbacksMayReadConnectionInfo`: a `Logger` and a `Dialer` call `ConnectionInfo` and `PDUSize` while the client holds its request lock, and get the session that is in place | n/a: the server has no callbacks (`Config.Logger` is a `*slog.Logger`) |
+| L10 Callback calls Close | Documented as not allowed: `Close`, `Connect` or an operation called from a `Logger` or `Dialer` of the same client does not return, because they run under the request lock (`client.Logger`, `client.Dialer`). No test: the call would not return. Goes with L3 | n/a |
+| L11 Slow callback | n/a: no event or report callbacks; a `Logger` is synchronous by its documented contract | n/a |
+| L12 Queue at capacity | n/a: no queue | `TestConnectionLimitRefusesExtraClients` (`server/server_test.go`): a connection past `MaxConnections` is closed on accept and logged; there is no counter |
+| L13 Concurrent sessions | `TestReadAreaConcurrent`, e2e `TestConcurrentUseOfOneClient`: one client, its calls serialised, each gets its own answer | `TestConcurrentClientsAndReconnect` (`server/server_test.go`): eight clients |
+| L14 Failure during construction | `TestConnectOnceFailureClearsConnection`, `TestConnect_SetupFailures`, `TestSetupAnswerMessageType`, `TestWithDialerConnAndErrorClosesConn`, e2e `TestDialerTransportFaultsDuringConnect`: a failed `Connect` leaves no session and no open connection; goleak | `TestConfigValidation`, `TestListenAndServeBadAddress`: nothing is started |
+| L15 Shutdown(ctx) | n/a: no `Shutdown` | n/a: no `Shutdown`; `Serve` ends with its context (`TestServeEndsWithTheContext`) |
+| L16 Close racing reconnect | n/a: no reconnect loop; `Close` against `Connect` is L5 | n/a |
+
+How these tests wait: the client tests run against a scripted peer on loopback and agree with it through channels (a request that arrived, an answer that is held back, a call that returned); a deadline is a context the test expires by hand, except in the range scan test, where the probe timeout of 200 ms is what is tested. The server tests run in a `testing/synctest` bubble over in-memory connections, where `synctest.Wait` returns once every goroutine of the server is blocked. No test sleeps to let something happen, and every wait is bounded. `TestCloseWaitsForAConnectionNotYetServed` uses the one test seam of the module, the unexported `Server.afterAddConn`, to stop `Serve` between registering a connection and starting its goroutine.
+
 ## Goroutine leaks
 
 `client`, `e2e` and `server` run `goleak.VerifyTestMain`: a test that leaves a goroutine behind fails the package. `go.uber.org/goleak` is a test-only dependency.
@@ -53,7 +79,7 @@ CI runs on Linux only. See [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md#platf
 
 The **Self-interop** workflow (manual, never required) runs this commit's client against `snap7-interop-otfabric:latest` with `SNAP_INTEROP_SERVERS=otfabric` and logs the image digest. It finds a wire change that breaks an earlier release; it is not independent verification. One step is a known difference (`knownDifferences` in `interop/runner.go`): that image answers a write to a read-only area with `0x03` (write-protected, the Siemens code), the references with `0x0A`; snap7-interop lists it in `tests/known-differences.tsv` as an intentional difference.
 
-With managed servers and no Docker, the suite skips (`interop/harness.go`). There is no `*_REQUIRE_*` switch that turns this into a failure: check `go test -v` output to confirm that the matrix ran.
+With managed servers and no Docker, the suite skips (`interop/harness.go`), unless `SNAP_INTEROP_REQUIRE_DOCKER=1`: then it fails. `make interop` and the Interop workflow set that variable, so neither can pass without running the matrix; a plain `go test -tags=interop ./interop/...` still skips.
 
 ## Coverage policy
 
@@ -61,7 +87,13 @@ With managed servers and no Docker, the suite skips (`interop/harness.go`). Ther
 
 ## Fuzzing
 
-Fuzz targets live in `wire/`, `model/codec/`, `server/` and `internal/capture/`, next to the decoders and encoders. Encoder targets check that every input is either refused with `ErrOutOfRange` or encoded with exactly its fields and consistent lengths. `make fuzz` discovers them; do not list them by name. Every new decoder of untrusted input gets a target.
+Fuzz targets live in `wire/`, `client/`, `model/codec/`, `server/` and `internal/capture/`, next to the decoders and encoders. Encoder targets check that every input is either refused with `ErrOutOfRange` or encoded with exactly its fields and consistent lengths. `make fuzz` discovers them; do not list them by name. Every new decoder of untrusted input gets a target.
+
+A decoder target asserts what an accepted input means, not only that decoding returns: the result holds the fields of the input; every slice it returns is a view of the input, inside it and without capacity beyond its length; where an encoder exists, the result encodes to an answer that decodes to the same result; the input cut by one octet is refused; and a refusal returns nothing. The targets take seeds from the recorded traffic in `testdata/captures`. In `client`, one target feeds SZL list data to the client's record decoders, and one runs the calls that collect a user data answer against an in-memory peer that grants any PDU size and repeats a fuzzed packet: the result of a call stays within the limits of [SECURITY.md](SECURITY.md#limits-on-what-a-peer-can-send).
+
+## Limits and ownership
+
+Each limit of [SECURITY.md](SECURITY.md#limits-on-what-a-peer-can-send) has a test in `client/answer_limits_test.go` that sends one answer at the limit and one past it; where the limit bounds memory, the test also measures the bytes the call allocates (`runtime.MemStats.TotalAlloc` around the call, which includes the scripted peer in the same process) against a budget. `wire/ownership_test.go` pins that the decoders return borrowed views without spare capacity; `client` `TestResultsAreTheCallers` and `server` `TestMemoryIsNotSharedWithTheCaller` pin that results and registered memory are copies.
 
 Regression procedure: when a fuzz run fails, Go writes the input to `testdata/fuzz/<FuzzName>/` in the package. Commit that file with the fix, so `go test` replays it as a seed from then on.
 

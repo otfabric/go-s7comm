@@ -3,6 +3,7 @@
 package wire
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
 )
@@ -101,8 +102,38 @@ func FuzzParseSZLResponse(f *testing.F) {
 	binary.BigEndian.PutUint16(data[4:6], 0x0424)
 	binary.BigEndian.PutUint16(data[6:8], 0)
 	f.Add(data)
+	f.Add([]byte{RetCodeNotAvailable, 0, 0, 0})
+	for _, p := range seedPDUs(f, 8, func(p recordedPDU) bool {
+		return !p.fromClient && p.header.ROSCTR.IsUserdata() && len(p.param) >= 12 && p.param[5]&0x0f == UserdataGroupCPU && p.param[6] == UserdataSZL
+	}) {
+		f.Add(p.data)
+	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = ParseSZLResponse(data)
+		resp, err := ParseSZLResponse(data)
+		if err != nil {
+			if resp != nil {
+				t.Fatalf("a refused answer returned %+v", resp)
+			}
+			return
+		}
+		declared := int(binary.BigEndian.Uint16(data[2:4]))
+		if data[0] != RetCodeSuccess || declared < 4 || 4+declared > len(data) {
+			t.Fatalf("accepted with return code %#x and a declared length of %d in %d octets", data[0], declared, len(data))
+		}
+		if resp.SZLID != binary.BigEndian.Uint16(data[4:6]) || resp.SZLIndex != binary.BigEndian.Uint16(data[6:8]) || int(resp.DataLength) != declared {
+			t.Fatalf("response %+v does not hold the fields of % x", resp, data[:8])
+		}
+		if off, ok := within(data, resp.Data); !ok || (len(resp.Data) > 0 && off != 8) || len(resp.Data) != declared-4 || cap(resp.Data) != len(resp.Data) {
+			t.Fatalf("list data of %d octets (capacity %d) for a declared length of %d", len(resp.Data), cap(resp.Data), declared)
+		}
+		// The same data section read as plain user data: ID, index, list.
+		payload, err := ParseUserdataData(data)
+		if err != nil || len(payload) != declared || !bytes.Equal(payload[4:], resp.Data) {
+			t.Fatalf("ParseUserdataData = %d octets, %v; the SZL answer declares %d", len(payload), err, declared)
+		}
+		if _, err := ParseSZLResponse(data[:4+declared-1]); err == nil {
+			t.Fatal("accepted with one octet less than the declared length")
+		}
 	})
 }
 

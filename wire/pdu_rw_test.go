@@ -4,7 +4,10 @@ package wire
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
+	"math"
+	"strconv"
 	"testing"
 )
 
@@ -533,26 +536,166 @@ func TestParseReadVarResponse_BitItem(t *testing.T) {
 	}
 }
 
+// BenchmarkParseReadVarResponse decodes recorded Read Var answers
+// (testdata/captures) of 1 item and of 19 items, the smallest and the
+// largest the recordings hold.
 func BenchmarkParseReadVarResponse(b *testing.B) {
-	param := []byte{FuncReadVar, 0x01}
-	data := []byte{RetCodeSuccess, 0x04, 0x00, 0x10, 0x12, 0x34, 0x56, 0x78}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = ParseReadVarResponse(param, data)
+	for _, n := range []int{1, 19} {
+		answer := recordedReadAnswer(b, n)
+		b.Run(strconv.Itoa(n)+"_items", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(answer.data)))
+			var items []ReadVarItem
+			for b.Loop() {
+				var err error
+				if items, err = ParseReadVarResponse(answer.param, answer.data); err != nil {
+					b.Fatal(err)
+				}
+			}
+			if len(items) != n {
+				b.Fatalf("%d items, want %d", len(items), n)
+			}
+		})
 	}
 }
 
+// readVarResultsFrom builds up to 20 well-formed Read Var results out of
+// arbitrary bytes: successful items in bits, in bytes and of one bit, with a
+// payload taken from b, and refused items.
+func readVarResultsFrom(b []byte) []ReadVarResult {
+	var out []ReadVarResult
+	for len(b) >= 2 && len(out) < 20 {
+		kind, n := b[0], min(int(b[1]%24), len(b)-2)
+		payload := b[2 : 2+n]
+		b = b[2+n:]
+		switch kind % 4 {
+		case 0:
+			out = append(out, ReadVarResult{ReturnCode: RetCodeSuccess, TransportSize: DataTransportSizeByte, RawLength: uint16(8 * n), Data: payload})
+		case 1:
+			out = append(out, ReadVarResult{ReturnCode: RetCodeSuccess, TransportSize: DataTransportSizeOctet, RawLength: uint16(n), Data: payload})
+		case 2:
+			out = append(out, ReadVarResult{ReturnCode: RetCodeSuccess, TransportSize: DataTransportSizeBit, RawLength: 1, Data: []byte{kind >> 7}})
+		default:
+			out = append(out, ReadVarResult{ReturnCode: RetCodeAddressFault})
+		}
+	}
+	return out
+}
+
+// requireReadVarRoundTrip encodes results as a Read Var answer and requires
+// that the answer decodes to the same items, and that every strict prefix of
+// its data section (the last 512 of them) is refused.
+func requireReadVarRoundTrip(t *testing.T, results []ReadVarResult) {
+	t.Helper()
+	pdu, err := EncodeReadVarResponse(1, results)
+	if err != nil {
+		t.Fatalf("EncodeReadVarResponse: %v", err)
+	}
+	h, rest, err := ParseS7Header(pdu)
+	if err != nil {
+		t.Fatalf("encoded answer: %v", err)
+	}
+	param, data := rest[:h.ParamLength], rest[h.ParamLength:]
+	items, err := ParseReadVarResponse(param, data)
+	if err != nil || len(items) != len(results) {
+		t.Fatalf("an answer of %d items decodes to %d items, %v", len(results), len(items), err)
+	}
+	for i, want := range results {
+		got := items[i]
+		if got.ReturnCode != want.ReturnCode || got.RawTransportSize != want.TransportSize || got.RawLength != want.RawLength || !bytes.Equal(got.Data, want.Data) {
+			t.Fatalf("item %d: %+v encodes to an answer that decodes to %+v", i, want, got)
+		}
+	}
+	for n := max(0, len(data)-512); n < len(data); n++ {
+		if _, err := ParseReadVarResponse(param, data[:n]); err == nil {
+			t.Fatalf("the first %d of %d octets of the data section are accepted", n, len(data))
+		}
+	}
+}
+
+// FuzzParseReadVarResponse: an accepted answer has one item per counted
+// item; the data of the successful ones are views of the data section, in
+// order and without overlap, each as long as its length field says, and a
+// refused item has none. The items encode (EncodeReadVarResponse) to an
+// answer that decodes to the same items, and every strict prefix of that
+// answer's data section is refused. The same holds for items built from the
+// input: the answer they encode to is accepted and returns them unchanged.
 func FuzzParseReadVarResponse(f *testing.F) {
 	f.Add([]byte{FuncReadVar, 1}, []byte{RetCodeSuccess, 0x04, 0x00, 0x10, 0x12, 0x34})
+	f.Add([]byte{FuncReadVar, 2}, []byte{RetCodeSuccess, 0x04, 0, 24, 1, 2, 3, 0, RetCodeAddressFault, 0, 0, 0})
+	f.Add([]byte{FuncReadVar, 1}, []byte{RetCodeSuccess, DataTransportSizeBit, 0, 1, 1})
+	for _, p := range seedPDUs(f, 12, answerTo(FuncReadVar)) {
+		f.Add(p.param, p.data)
+	}
 	f.Fuzz(func(t *testing.T, param, data []byte) {
-		_, _ = ParseReadVarResponse(param, data)
+		requireReadVarRoundTrip(t, readVarResultsFrom(data))
+
+		items, err := ParseReadVarResponse(param, data)
+		if err != nil {
+			if items != nil {
+				t.Fatalf("a refused answer returned %d items", len(items))
+			}
+			return
+		}
+		if len(param) < 2 || param[0] != FuncReadVar || len(items) != int(param[1]) {
+			t.Fatalf("%d items from parameter % x", len(items), param)
+		}
+		results := make([]ReadVarResult, len(items))
+		end := 0
+		for i, item := range items {
+			if item.ReturnCode != RetCodeSuccess {
+				if item.Data != nil {
+					t.Fatalf("item %d: refused with code %#x and %d octets of data", i, item.ReturnCode, len(item.Data))
+				}
+				results[i] = ReadVarResult{ReturnCode: item.ReturnCode}
+				continue
+			}
+			n, err := NormalizeResponseDataLength(ResponseTransportSize(item.RawTransportSize), item.RawLength)
+			if err != nil || len(item.Data) != n || cap(item.Data) != n {
+				t.Fatalf("item %d: %d octets (capacity %d), its length field means %d (%v)", i, len(item.Data), cap(item.Data), n, err)
+			}
+			if off, ok := within(data, item.Data); !ok || (n > 0 && off < end+4) {
+				t.Fatalf("item %d: data not inside the data section after item %d", i, i-1)
+			} else if n > 0 {
+				end = off + n
+			}
+			results[i] = ReadVarResult{ReturnCode: item.ReturnCode, TransportSize: item.RawTransportSize, RawLength: item.RawLength, Data: item.Data}
+		}
+		if len(data) <= math.MaxUint16 {
+			requireReadVarRoundTrip(t, results)
+		}
 	})
 }
 
+// FuzzNormalizeResponseDataLength: a length in bits is the smallest number
+// of bytes that holds them, a length in bytes is itself, and any other
+// transport size is refused.
 func FuzzNormalizeResponseDataLength(f *testing.F) {
 	f.Add(byte(DataTransportSizeByte), uint16(16))
 	f.Add(byte(DataTransportSizeOctet), uint16(4))
+	f.Add(byte(DataTransportSizeBit), uint16(1))
+	f.Add(byte(DataTransportSizeByte), uint16(math.MaxUint16))
+	for _, p := range seedPDUs(f, 8, answerTo(FuncReadVar)) {
+		if len(p.data) >= 4 {
+			f.Add(p.data[1], binary.BigEndian.Uint16(p.data[2:4]))
+		}
+	}
 	f.Fuzz(func(t *testing.T, transportSize byte, rawLength uint16) {
-		_, _ = NormalizeResponseDataLength(ResponseTransportSize(transportSize), rawLength)
+		n, err := NormalizeResponseDataLength(ResponseTransportSize(transportSize), rawLength)
+		raw := int(rawLength)
+		switch transportSize {
+		case DataTransportSizeBit, DataTransportSizeByte, DataTransportSizeInt:
+			if err != nil || n*8 < raw || n*8 >= raw+8 {
+				t.Fatalf("transport %#x, %d bits: %d bytes, %v", transportSize, raw, n, err)
+			}
+		case DataTransportSizeDInt, DataTransportSizeReal, DataTransportSizeOctet:
+			if err != nil || n != raw {
+				t.Fatalf("transport %#x, %d bytes: %d bytes, %v", transportSize, raw, n, err)
+			}
+		default:
+			if err == nil || n != 0 {
+				t.Fatalf("transport %#x accepted as %d bytes", transportSize, n)
+			}
+		}
 	})
 }

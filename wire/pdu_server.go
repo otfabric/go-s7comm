@@ -221,7 +221,7 @@ type WriteVarData struct {
 	ReturnCode    byte // reserved, 0x00 in a request
 	TransportSize byte // data transport size (DataTransportSize* constants)
 	RawLength     uint16
-	Data          []byte // payload, aliases the request
+	Data          []byte // payload, borrowed from the request: copy to keep or to change; no capacity beyond its length
 }
 
 // writeDataBytes is the payload length of a Write Var data item: the length
@@ -267,7 +267,7 @@ func ParseWriteVarRequest(param, data []byte) ([]VarSpec, []WriteVarData, error)
 		if start+n > len(data) {
 			return nil, nil, fmt.Errorf("%w: data item %d payload truncated", ErrMalformedRequest, i)
 		}
-		item.Data = data[start : start+n]
+		item.Data = data[start : start+n : start+n]
 		items = append(items, item)
 		off = start + n
 		if n%2 != 0 && i < len(specs)-1 {

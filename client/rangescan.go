@@ -15,8 +15,10 @@ import (
 // Probes run over the single connection and are serialized by request mutex, so Parallelism > 1
 // does not yield concurrent wire activity; it is retained for API consistency with other probe APIs.
 type RangeProbeRequest struct {
-	Area        model.Area
-	DBNumber    int
+	Area     model.Area
+	DBNumber int
+	// Start and End bound the scanned byte offsets, [Start, End). Both lie
+	// in the S7 byte address space: 0 <= Start <= End <= 2097152.
 	Start       int
 	End         int
 	Step        int // distance between probe offsets; if 0, use ProbeSize
@@ -27,7 +29,8 @@ type RangeProbeRequest struct {
 	Interval    time.Duration
 	Parallelism int // max concurrent probes; if <=0, sequential. API compatibility only—connection-backed probes are serialized, no concurrent wire I/O.
 	// Timeout bounds each probe read. 0 = 5s. A probe that times out ends the
-	// session (see LIMITATIONS.md), so the remaining probes fail fast.
+	// session (see ERRORS.md), so the remaining probes are not sent: each is
+	// reported as transport-error with ErrNotConnected.
 	Timeout time.Duration
 }
 
@@ -69,7 +72,8 @@ type RangeProbeResult struct {
 
 // ProbeReadableRanges scans the area in the configured range and consolidates adjacent readable probes into spans.
 // The client must be connected when the range is non-empty. The scan is read-only.
-// Invalid request (start > end, negative DBNumber for DB area) returns an error.
+// Invalid request (start > end, a range outside the S7 byte addresses 0..2097151, negative DBNumber for DB area)
+// returns a ValidationError before anything is sent.
 func (c *Client) ProbeReadableRanges(ctx context.Context, req RangeProbeRequest) (*RangeProbeResult, error) {
 	if err := validateRangeProbeRequest(req); err != nil {
 		return nil, err
@@ -88,9 +92,14 @@ func (c *Client) ProbeReadableRanges(ctx context.Context, req RangeProbeRequest)
 
 	out := &RangeProbeResult{Area: req.Area, DBNumber: req.DBNumber}
 
+	// The number of offsets is computed first, without adding step to an
+	// offset: Start + i*step stays below End for every offset kept.
 	var offsets []int
-	for o := req.Start; o < req.End; o += step {
-		offsets = append(offsets, o)
+	if span := req.End - req.Start; span > 0 {
+		offsets = make([]int, (span-1)/step+1)
+		for i := range offsets {
+			offsets[i] = req.Start + i*step
+		}
 	}
 
 	if len(offsets) > 0 {

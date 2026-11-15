@@ -324,11 +324,15 @@ func EncodeReadVarRequest(pduRef uint16, addrs []S7AnyAddress) ([]byte, error) {
 }
 
 // ReadVarItem represents a single read result. Raw fields are preserved; Data is normalized payload (success only).
+//
+// Data is borrowed from the data section given to ParseReadVarResponse: copy
+// it to keep it or to change it. It has no capacity beyond its length, so an
+// append to it allocates and does not write into the input.
 type ReadVarItem struct {
 	ReturnCode       byte   // Item return code
 	RawTransportSize byte   // Transport size from wire
 	RawLength        uint16 // Length from wire (bits or bytes per transport size)
-	Data             []byte // Normalized payload bytes (only when ReturnCode == RetCodeSuccess)
+	Data             []byte // Normalized payload bytes (only when ReturnCode == RetCodeSuccess); borrowed from the input
 }
 
 // NormalizeResponseDataLength converts the length field of a Read Var
@@ -415,7 +419,7 @@ func decodeReadResponseItem(data []byte, offset int, isLastItem bool) (ReadVarIt
 		return ReadVarItem{}, 0, fmt.Errorf("read response item at offset %d: %w", offset, ErrTruncatedItemPayload)
 	}
 
-	item.Data = data[offset+4 : offset+4+byteLen]
+	item.Data = data[offset+4 : offset+4+byteLen : offset+4+byteLen]
 	next := offset + 4 + byteLen
 	// Consume fill byte for 16-bit alignment before next item (classic S7 multi-item response).
 	if byteLen%2 != 0 {
@@ -431,6 +435,7 @@ func decodeReadResponseItem(data []byte, offset int, isLastItem bool) (ReadVarIt
 
 // ParseReadVarResponse parses a read variable response. Strict: requires exactly itemCount
 // items; fails on truncated item headers, length overrun, unknown transport size, or count mismatch.
+// The Data of each item is borrowed from data (see ReadVarItem).
 func ParseReadVarResponse(param, data []byte) ([]ReadVarItem, error) {
 	if len(param) < 2 {
 		return nil, &S7Error{Message: "read response param too short"}
@@ -483,7 +488,9 @@ func EncodeWriteVarRequest(pduRef uint16, addr S7AnyAddress, value []byte) ([]by
 }
 
 // ParseWriteVarResponseCodes returns the item return codes of a Write Var
-// response, one per item the parameter section counts.
+// response, one per item the parameter section counts. The result is
+// borrowed from data: copy it to keep it or to change it. It has no
+// capacity beyond its length.
 func ParseWriteVarResponseCodes(param, data []byte) ([]byte, error) {
 	if len(param) < 2 {
 		return nil, &S7Error{Message: "write response param too short"}
@@ -495,7 +502,7 @@ func ParseWriteVarResponseCodes(param, data []byte) ([]byte, error) {
 	if n == 0 || len(data) < n {
 		return nil, &S7Error{Message: fmt.Sprintf("write response: %d item codes for %d items", len(data), n)}
 	}
-	return data[:n], nil
+	return data[:n:n], nil
 }
 
 // ParseWriteVarResponse parses a write variable response. It returns nil

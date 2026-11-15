@@ -572,7 +572,7 @@ ParseReadVarDBRead returns, per item of a Read Var job, the ranges of a DBREAD i
 func ParseUserdataData(data []byte) ([]byte, error)
 ```
 
-ParseUserdataData returns the payload of a user data data section (after return code, transport size and length). A return code other than 0xFF is returned as an error.
+ParseUserdataData returns the payload of a user data data section (after return code, transport size and length). A return code other than 0xFF is returned as an error. The payload is borrowed from data: copy it to keep it or to change it. It has no capacity beyond its length.
 
 ### func ParseWriteVarRequest
 
@@ -596,7 +596,7 @@ ParseWriteVarResponse parses a write variable response. It returns nil only when
 func ParseWriteVarResponseCodes(param, data []byte) ([]byte, error)
 ```
 
-ParseWriteVarResponseCodes returns the item return codes of a Write Var response, one per item the parameter section counts.
+ParseWriteVarResponseCodes returns the item return codes of a Write Var response, one per item the parameter section counts. The result is borrowed from data: copy it to keep it or to change it. It has no capacity beyond its length.
 
 ### func ReadVarResultSize
 
@@ -721,7 +721,7 @@ BlockInfoData is a block header from a block info response, in the layout S7-300
 func ParseBlockInfoResponse(payload []byte) (BlockInfoData, error)
 ```
 
-ParseBlockInfoResponse parses the payload (ParseUserdataData) of a block info response.
+ParseBlockInfoResponse parses the payload (ParseUserdataData) of a block info response. The load memory length and the security field are 32 bits on the wire: a value above math.MaxInt32 is refused, so that both fields hold the wire value on every platform, also where int has 32 bits.
 
 ### type BlockListEntry
 
@@ -839,11 +839,13 @@ type ReadVarItem struct {
 	ReturnCode       byte   // Item return code
 	RawTransportSize byte   // Transport size from wire
 	RawLength        uint16 // Length from wire (bits or bytes per transport size)
-	Data             []byte // Normalized payload bytes (only when ReturnCode == RetCodeSuccess)
+	Data             []byte // Normalized payload bytes (only when ReturnCode == RetCodeSuccess); borrowed from the input
 }
 ```
 
 ReadVarItem represents a single read result. Raw fields are preserved; Data is normalized payload (success only).
+
+Data is borrowed from the data section given to ParseReadVarResponse: copy it to keep it or to change it. It has no capacity beyond its length, so an append to it allocates and does not write into the input.
 
 #### func ParseReadVarResponse
 
@@ -851,7 +853,7 @@ ReadVarItem represents a single read result. Raw fields are preserved; Data is n
 func ParseReadVarResponse(param, data []byte) ([]ReadVarItem, error)
 ```
 
-ParseReadVarResponse parses a read variable response. Strict: requires exactly itemCount items; fails on truncated item headers, length overrun, unknown transport size, or count mismatch.
+ParseReadVarResponse parses a read variable response. Strict: requires exactly itemCount items; fails on truncated item headers, length overrun, unknown transport size, or count mismatch. The Data of each item is borrowed from data (see ReadVarItem).
 
 ### type ReadVarResult
 
@@ -990,7 +992,7 @@ S7Header represents an S7 protocol header. All fields are raw wire values.
 func ParseS7Header(data []byte) (*S7Header, []byte, error)
 ```
 
-ParseS7Header parses an S7 header from data
+ParseS7Header parses an S7 header from data. The second result is what follows the header: the parameter and data sections, and any octets after them. It is borrowed from data: copy it to keep it or to change it. It has no capacity beyond its length.
 
 ### type SZLResponse
 
@@ -999,11 +1001,11 @@ type SZLResponse struct {
 	SZLID      uint16
 	SZLIndex   uint16
 	DataLength uint16
-	Data       []byte
+	Data       []byte // borrowed from the input
 }
 ```
 
-SZLResponse holds a parsed SZL response
+SZLResponse holds a parsed SZL response. Data is borrowed from the data section given to ParseSZLResponse: copy it to keep it or to change it. It has no capacity beyond its length.
 
 #### func ParseSZLResponse
 
@@ -1093,11 +1095,11 @@ func (e *UnsupportedSyntaxError) Error() string
 ```go
 type UploadChunk struct {
 	Done bool
-	Data []byte
+	Data []byte // borrowed from the input
 }
 ```
 
-UploadChunk is one chunk returned by upload continuation responses.
+UploadChunk is one chunk returned by upload continuation responses. Data is borrowed from the data section given to ParseUploadResponse: copy it to keep it or to change it. It has no capacity beyond its length.
 
 #### func ParseUploadResponse
 
@@ -1159,7 +1161,7 @@ type WriteVarData struct {
 	ReturnCode    byte // reserved, 0x00 in a request
 	TransportSize byte // data transport size (DataTransportSize* constants)
 	RawLength     uint16
-	Data          []byte // payload, aliases the request
+	Data          []byte // payload, borrowed from the request: copy to keep or to change; no capacity beyond its length
 }
 ```
 

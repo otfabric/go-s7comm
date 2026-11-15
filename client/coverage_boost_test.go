@@ -32,21 +32,6 @@ func TestNopLoggerMethods(t *testing.T) {
 	l.Error("e")
 }
 
-func TestIsUploadProtocolError(t *testing.T) {
-	if isUploadProtocolError(nil) {
-		t.Fatal("nil should not be protocol error")
-	}
-	if !isUploadProtocolError(ErrProtocolFailure) {
-		t.Fatal("ErrProtocolFailure should match")
-	}
-	if !isUploadProtocolError(&wire.S7Error{Code: 1}) {
-		t.Fatal("S7Error should match")
-	}
-	if isUploadProtocolError(errors.New("other")) {
-		t.Fatal("plain error should not match")
-	}
-}
-
 func TestDiscoverOptionsApplied(t *testing.T) {
 	// Invalid CIDR fails after options are applied (covers option setters).
 	_, err := Discover(context.Background(), "not-a-cidr",

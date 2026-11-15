@@ -62,10 +62,12 @@ func (c *Client) PDUSize() int
 Behavior notes:
 
 - Connect performs TCP dial, go-cotp TP0 handshake (`cotp.Connect` with two-byte big-endian TSAP selectors), and S7 setup communication. S7 PDUs are exchanged as complete TSDUs (`WriteTSDU` / `ReadTSDU`). Default COTP `MaxTPDULength` offer is 1024. The client accepts TSDUs of at most 65535 bytes, the largest S7 PDU.
+- The negotiated PDU size is at most the proposed one (`WithMaxPDU`, default 480): negotiation can only lower the proposal, so a larger size in the setup answer counts as the proposal. An answer longer than the negotiated size (the proposed size when the setup answer grants 0) is refused with an error that matches `ErrProtocolFailure`. All limits on what a peer can send are in [SECURITY.md](SECURITY.md#limits-on-what-a-peer-can-send).
+- An answer must be of a message type that answers the request: an acknowledgement (Ack-Data, or Ack) for a job, user data for a user data request. Anything else with the request's PDU reference is refused (`ErrProtocolFailure`).
 - A second Connect() on an already-connected client only replaces the session after the new handshake succeeds; a failed reconnect leaves the existing session intact.
-- **Context:** cancel (with or without deadline) is honored on dial (by a custom `Dialer` only if it honors `ctx`) and TSDU I/O via go-cotp; mid-I/O cancel aborts the session. `WithTimeout` bounds Connect, not later PDUs. See [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
+- **Context:** cancel (with or without deadline) is honored on dial (by a custom `Dialer` only if it honors `ctx`) and TSDU I/O via go-cotp. A call whose context ends after its request was sent, or whose transport fails, ends the session: the connection is closed, `ConnectionInfo()` reports zero values and later calls return `ErrNotConnected` until `Connect` succeeds again. A context that has already ended sends nothing and leaves the session as it is. `WithTimeout` bounds Connect, not later PDUs. See [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
 - On setup failure of a new dial, that connection is closed; a prior healthy session is left intact until a successful swap.
-- Close maps a successful local go-cotp close (`cotp.ErrClosed`) to a nil error.
+- Close maps a successful local go-cotp close (`cotp.ErrClosed`) to a nil error. It is safe to call more than once and from multiple goroutines, and returns nil on a client that is not connected. It waits for the operation in flight on the client and does not interrupt it; cancel that operation's context to end it.
 - Invalid caller input (port, timeout, max PDU, rack/slot) returns `*ValidationError`.
 - Request methods are serialized internally for protocol safety.
 
@@ -141,7 +143,7 @@ Behavior notes:
 
 - Byte read methods return `*ReadResult` and a validation `error`. Use `result.OK()` for success; `result.Err()` for a non-success read outcome; `result.Data` for the payload. Empty or short reads are never reported as success. See [ERRORS.md](ERRORS.md).
 - ReadArea chunks requests based on negotiated PDU size. A chunk answered with fewer bytes than asked ends the read, so `Data` always holds the bytes of `Start`, `Start+1`, ... up to the first gap. Status is derived from requested vs returned length (success, short-read, empty-read) or from S7 item return codes (rejected). Non-success Read Var items with transport size `0x00` (common for Snap7 address faults) are surfaced as rejected with `ReturnCode` set, not as a protocol parse failure.
-- WriteArea writes `len(data)` bytes; `addr.Size` is ignored. Large payloads are chunked. Uses WriteVar with optional rate limiting. Invalid address returns `*ValidationError`.
+- WriteArea writes `len(data)` bytes; `addr.Size` is ignored. Large payloads are chunked, an even number of bytes per chunk, so that every chunk fits an even and an odd negotiated PDU size. Uses WriteVar with optional rate limiting. Invalid address returns `*ValidationError`.
 - `ReadBit` / `WriteBit` use native S7 BIT transport (not byte read-modify-write) and return a **strict** `error` (not `ReadResult`). `BitOffset` must be `0..7` (no wrap); invalid addresses return `*ValidationError`. `ReadDBBit` / `WriteDBBit` are DB helpers (`DB1.DBX10.3` → db=1, byte=10, bit=3).
 
 ### Range scan API
@@ -161,7 +163,7 @@ type RangeProbeRequest struct {
     Repeat      int
     Interval    time.Duration
     Parallelism int
-    Timeout     time.Duration // bounds each probe read; 0 = 5s
+    Timeout     time.Duration // bounds each probe read; 0 = 5s; a probe that times out ends the session
 }
 
 type ReadProbeObservation struct {
@@ -200,6 +202,8 @@ func (c *Client) ProbeReadableRanges(ctx context.Context, req RangeProbeRequest)
 ```
 
 Behavior: For each offset in [Start, End) by Step, performs a read of ProbeSize bytes (one probe per offset). Adjacent probes with the same status are merged into spans. Summary aggregates spans by readable/empty/failed/inconclusive. Optional Repeat and Interval set Stable/AllZero; Retries with mixed outcomes yield Inconclusive. Read-only.
+
+The range must lie in the S7 byte address space: `0 <= Start <= End <= 2097152`. A range outside it returns `*ValidationError` before anything is sent. A probe that times out ends the session (see Construction and lifecycle); the remaining offsets are then reported as `transport-error` with `ErrNotConnected` and are not sent.
 
 ### Compare read API
 
@@ -432,14 +436,14 @@ func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (
 
 These are the requests Snap7, STEP 7 5.5, TIA Portal V13 and WinCC Advanced send, byte for byte, and each decodes the answers of a real CPU 315-2 PN/DP and IM151-8 PN/DP CPU recorded in [testdata/captures](testdata/captures/README.md) (`client/capture_test.go`).
 
-- **SZL reads** (`Identify`, `GetCPUState`, `GetProtectionLevel`, `ReadDiagBuffer*`): user data, CPU functions, read SZL. An answer the CPU sends in several packets ("more data follows") is collected with follow-up requests, up to 256 packets. Records are read by their index or position in the SZL list, not by searching the text.
+- **SZL reads** (`Identify`, `GetCPUState`, `GetProtectionLevel`, `ReadDiagBuffer*`): user data, CPU functions, read SZL. An answer the CPU sends in several packets ("more data follows") is collected with follow-up requests, up to 256 packets. Each packet must be a user data response of the function group and subfunction that were asked for, and the answer must be the SZL list that was asked for (its ID; the index is not compared, because a recorded CPU answers a request for index 4 with index 0); otherwise the call returns an error that matches `ErrProtocolFailure`. A refusal is a `*wire.S7Error` ([ERRORS.md](ERRORS.md#s7error)). Records are read by their index or position in the SZL list, not by searching the text.
 - **Identify**: SZL 0x0011 index 1 (order number) and index 7 (firmware, `Vx.y.z`); SZL 0x001C indexes 1 (`SystemName`), 2 (`ModuleName`), 3 (`PlantID`), 4 (`Copyright`), 5 (`SerialNumber`), 7 (`ModuleType`, and `CPUType` when it names a CPU) and 8 (`MemoryCardSerial`). `(info, err)` when one of the two lists fails, `(nil, err)` when both do.
 - **GetCPUState**: SZL 0x0424, the mode in the low nibble of the first record's `bzu-id` byte: 1–4 STOP, 5–7 STARTUP, 8–9 RUN, 10 HOLD, other UNKNOWN.
 - **GetProtectionLevel**: SZL 0x0232 index 4, `sch_rel`: Siemens level 1 → `ProtectionNone`, 2 → `ProtectionRead` (write protected), 3 → `ProtectionReadWrite`; another value is an error.
 - **ReadDiagBuffer**: per 20-byte record the event ID, its class (high nibble), the priority class, info 1 and 2, and the BCD time stamp as hex text.
-- **BlockCounts, ListBlocks, GetBlockInfo**: user data, block functions (count, list of one type, block info). `ListBlocks` collects every packet of a long list.
+- **BlockCounts, ListBlocks, GetBlockInfo**: user data, block functions (count, list of one type, block info). `ListBlocks` collects every packet of a long list; a list of more than 65,536 entries, the number of 16-bit block numbers, is refused (`ErrProtocolFailure`). `GetBlockInfo` refuses a header whose load memory length or security field is above 2,147,483,647, so both hold the wire value on 32-bit platforms too.
 - **GetBlockInfo**: on transport/protocol failure returns `(nil, err)`; on parse failure after transport success returns partial `BlockInfo` (Type, Number) plus `err`. A block number outside 0..99999 or an unknown block type returns `*ValidationError`.
-- **UploadBlock**: start upload with the file name `_0<type><5 digits>A`, upload by the 4-byte upload ID the CPU assigns, end upload. The result is the whole block as the CPU sends it (header, body, footer). Performs a best-effort end-upload cleanup before returning (500ms timeout); cleanup errors are not returned. Invalid block number returns `*ValidationError`.
+- **UploadBlock**: start upload with the file name `_0<type><5 digits>A`, upload by the 4-byte upload ID the CPU assigns, end upload. The result is the whole block as the CPU sends it (header, body, footer). Each segment is requested once; an upload of more than 4,096 segments or 8 MiB is refused. Performs a best-effort end-upload cleanup before returning (500ms timeout); cleanup errors are not returned, and nothing is sent when the upload ended the session. Invalid block number returns `*ValidationError`.
 
 ### Client options
 
@@ -477,7 +481,9 @@ Defaults:
 - dialer: nil (`net.Dialer` with the timeout); a custom `Dialer` gets network `"tcp"`, `host:port` and a context carrying the timeout, and returns a non-nil connection exactly when the error is nil. The scan helpers have their own dialer: `WithDiscoverDialer`, `RackSlotProbeRequest.Dialer` and `CompareReadRequest.Dialer` (nil = `net.Dialer`)
 
 `Logger` is printf-style and optional; callbacks run synchronously on the request
-path. `NewSlogLogger` adapts `log/slog` without changing the interface.
+path, while the client holds its request lock, and so does a `Dialer`: they may call
+`ConnectionInfo` and `PDUSize`, and must not call an operation, `Connect` or `Close`
+of the same client, which would not return. `NewSlogLogger` adapts `log/slog` without changing the interface.
 `NewSlogLogger(nil)` is a no-op. See [OBSERVABILITY.md](OBSERVABILITY.md).
 
 `WithTSAP` selects explicit local/remote TSAPs (skips rack/slot packing). `WithAutoRackSlot` tries common rack/slot pairs (or a brute range when `brute` is true); when every pair fails, the error wraps the last attempt's error.
@@ -602,7 +608,7 @@ import "github.com/otfabric/go-s7comm/wire"
 
 ### Transport stack (go-cotp)
 
-Live connections use **github.com/otfabric/go-cotp** TP0 service (go.mod requires `v1.3.0`). The client dials TCP, calls `cotp.Connect` with opaque TSAP selectors, then exchanges complete S7 PDUs as TSDUs. TPKT framing and COTP CR/CC/DT segmentation are owned by go-cotp (which depends on go-tpkt). This module does not expose a local transport package and does not import go-tpkt in production or test code.
+Live connections use **github.com/otfabric/go-cotp** TP0 service (go.mod requires `v1.4.1`). The client dials TCP, calls `cotp.Connect` with opaque TSAP selectors, then exchanges complete S7 PDUs as TSDUs. TPKT framing and COTP CR/CC/DT segmentation are owned by go-cotp (which depends on go-tpkt). This module does not expose a local transport package and does not import go-tpkt in production or test code.
 
 ### TSAP helpers
 
@@ -761,7 +767,7 @@ func (s *Server) Read(area Area, db, start, size int) ([]byte, error)         //
 func (s *Server) Write(area Area, db, start int, data []byte) error           // host side; ReadOnly does not apply
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error            // ErrServerClosed after Close, ctx.Err() when ctx ends
 func (s *Server) ListenAndServe(ctx context.Context, address string) error
-func (s *Server) Close() error                                                // closes listeners and connections, waits
+func (s *Server) Close() error                                                // closes listeners and connections, waits for every connection goroutine; safe from multiple goroutines
 
 type Config struct {
     MaxPDUSize       int           // 240..4096, default 480: the largest PDU Setup Communication grants

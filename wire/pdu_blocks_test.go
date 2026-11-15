@@ -4,8 +4,10 @@ package wire
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -128,6 +130,46 @@ func TestParseBlockAnswers(t *testing.T) {
 	}
 }
 
+// The load memory length and the security field of a block header are 32
+// bits on the wire and int in BlockInfoData: a value fits when it is at most
+// math.MaxInt32, on every platform (this table also runs where int has 32
+// bits), and is refused above it.
+func TestParseBlockInfo32BitFields(t *testing.T) {
+	for _, field := range []struct {
+		name string
+		at   int
+		get  func(BlockInfoData) int
+	}{
+		{"load memory", 14, func(b BlockInfoData) int { return b.LoadMemory }},
+		{"security", 18, func(b BlockInfoData) int { return b.Security }},
+	} {
+		for _, tc := range []struct {
+			v  uint32
+			ok bool
+		}{
+			{0, true}, {1, true}, {math.MaxInt32 - 1, true}, {math.MaxInt32, true},
+			{math.MaxInt32 + 1, false}, {math.MaxUint32 - 1, false}, {math.MaxUint32, false},
+		} {
+			rec := make([]byte, blockInfoSize)
+			binary.BigEndian.PutUint32(rec[field.at:], tc.v)
+			bi, err := ParseBlockInfoResponse(rec)
+			if !tc.ok {
+				if err == nil {
+					t.Errorf("%s %#x: accepted as %d", field.name, tc.v, field.get(bi))
+				}
+				continue
+			}
+			if err != nil {
+				t.Errorf("%s %#x: %v", field.name, tc.v, err)
+				continue
+			}
+			if got := field.get(bi); got < 0 || uint32(got) != tc.v {
+				t.Errorf("%s %#x: decoded as %d", field.name, tc.v, got)
+			}
+		}
+	}
+}
+
 // Upload answers of a CPU 315-2 PN/DP to Snap7 (client demo, frames 18, 20).
 func TestParseUploadAnswers(t *testing.T) {
 	start, err := ParseStartUploadResponse(unhex(t, "1d 00 01 00 00 00 00 07 07 30 30 30 30 32 31 36"))
@@ -198,10 +240,51 @@ func TestUserdataParamAndData(t *testing.T) {
 	}
 }
 
+// FuzzParseStartUploadResponse: an accepted answer is a Start Upload
+// parameter of at least 8 octets whose length field, when present, lies
+// inside it; the upload ID is octets 4 to 7; a length field of up to nine
+// decimal digits is that number, and no length field is -1. A refusal is an
+// S7Error.
 func FuzzParseStartUploadResponse(f *testing.F) {
 	f.Add([]byte{FuncUploadStart, 0, 1, 0, 0, 0, 0, 7, 3, '2', '1', '6'})
 	f.Add([]byte{FuncUploadStart, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0})
-	f.Fuzz(func(t *testing.T, param []byte) { _, _ = ParseStartUploadResponse(param) })
+	f.Add([]byte{FuncUploadStart, 0, 1, 0, 0, 0, 0, 7})
+	for _, p := range seedPDUs(f, 4, answerTo(FuncUploadStart)) {
+		f.Add(p.param)
+	}
+	f.Fuzz(func(t *testing.T, param []byte) {
+		start, err := ParseStartUploadResponse(param)
+		if err != nil {
+			var s7Err *S7Error
+			if !errors.As(err, &s7Err) || start != (StartUpload{}) {
+				t.Fatalf("refused with %v and %+v", err, start)
+			}
+			return
+		}
+		if len(param) < 8 || param[0] != FuncUploadStart || start.UploadID != binary.BigEndian.Uint32(param[4:8]) {
+			t.Fatalf("accepted % x as %+v", param, start)
+		}
+		if len(param) == 8 {
+			if start.Length != -1 {
+				t.Fatalf("length %d without a length field", start.Length)
+			}
+			return
+		}
+		n := int(param[8])
+		if 9+n > len(param) {
+			t.Fatalf("length field of %d octets in a parameter of %d", n, len(param))
+		}
+		field := param[9 : 9+n]
+		digits := n > 0 && n <= 9
+		want := 0
+		for _, c := range field {
+			digits = digits && c >= '0' && c <= '9'
+			want = want*10 + int(c-'0')
+		}
+		if digits && start.Length != want {
+			t.Fatalf("length field %q decoded as %d", field, start.Length)
+		}
+	})
 }
 
 func FuzzParseUploadResponse(f *testing.F) {

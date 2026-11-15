@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all check test test-race coverage coverage-check coverage-pkg-check cover e2e fuzz fuzz-targets cross bench lint lint-ci vuln fmt vet clean test-interop interop docs-check
+.PHONY: help all check test test-race coverage coverage-check coverage-pkg-check cover e2e fuzz fuzz-targets cross bench bench-smoke lint lint-ci vuln fmt vet clean test-interop interop docs-check
 
 # Parent otfabric/go.work may pin older modules; isolate toolchain commands.
 export GOWORK := off
@@ -46,6 +46,10 @@ test-race: test ## Alias for race-enabled test run
 bench: ## Run benchmarks (discovery, probe, compare, wire parsers)
 	@echo "Running benchmarks"
 	@go test -count=1 -bench=. -benchmem ./...
+
+bench-smoke: ## Run every benchmark once, without the tests (does each still run?)
+	@echo "Running every benchmark once"
+	@go test -count=1 -run '^$$' -bench=. -benchtime=1x ./...
 
 coverage: ## Run tests with coverage (writes coverage.out)
 	@echo "Running coverage"
@@ -114,9 +118,13 @@ docs-check: ## Check that the documents agree with the code (docsync)
 clean: ## Remove generated coverage artifacts
 	@rm -f coverage.out coverage.html
 
+# SNAP_INTEROP_REQUIRE_DOCKER=1: without Docker the suite fails instead of
+# skipping (TEST-007). It applies to managed servers only; with
+# SNAP_INTEROP_MANAGED=0 the suite uses running servers and needs no Docker.
 test-interop: ## Run SNAP7 interop suite (Docker; full fixture matrix × native+python)
 	@echo "Running interop tests against snap7-interop servers"
-	@SNAP_INTEROP_NATIVE_IMAGE="$(SNAP_INTEROP_NATIVE_IMAGE)" \
+	@SNAP_INTEROP_REQUIRE_DOCKER=1 \
+		SNAP_INTEROP_NATIVE_IMAGE="$(SNAP_INTEROP_NATIVE_IMAGE)" \
 		SNAP_INTEROP_PYTHON_IMAGE="$(SNAP_INTEROP_PYTHON_IMAGE)" \
 		go test -tags=interop -count=1 -race ./interop/...
 

@@ -155,7 +155,8 @@ func ParseUserdataParam(param []byte) (*UserdataParam, error) {
 
 // ParseUserdataData returns the payload of a user data data section (after
 // return code, transport size and length). A return code other than 0xFF is
-// returned as an error.
+// returned as an error. The payload is borrowed from data: copy it to keep
+// it or to change it. It has no capacity beyond its length.
 func ParseUserdataData(data []byte) ([]byte, error) {
 	if len(data) < 4 {
 		return nil, &S7Error{Message: "user data section too short"}
@@ -167,7 +168,7 @@ func ParseUserdataData(data []byte) ([]byte, error) {
 	if 4+n > len(data) {
 		return nil, &S7Error{Message: fmt.Sprintf("user data length %d past the %d bytes received", n, len(data)-4)}
 	}
-	return data[4 : 4+n], nil
+	return data[4 : 4+n : 4+n], nil
 }
 
 // EncodeSZLRequest creates a SZL read request: user data, CPU functions,
@@ -182,12 +183,14 @@ func EncodeSZLRequest(pduRef, szlID, szlIndex uint16) []byte {
 	return userdataRequest(pduRef, UserdataGroupCPU, UserdataSZL, data)
 }
 
-// SZLResponse holds a parsed SZL response
+// SZLResponse holds a parsed SZL response. Data is borrowed from the data
+// section given to ParseSZLResponse: copy it to keep it or to change it. It
+// has no capacity beyond its length.
 type SZLResponse struct {
 	SZLID      uint16
 	SZLIndex   uint16
 	DataLength uint16
-	Data       []byte
+	Data       []byte // borrowed from the input
 }
 
 // ParseSZLResponse parses the first packet of a SZL read response from the
@@ -217,7 +220,7 @@ func ParseSZLResponse(data []byte) (*SZLResponse, error) {
 		SZLID:      binary.BigEndian.Uint16(data[4:6]),
 		SZLIndex:   binary.BigEndian.Uint16(data[6:8]),
 		DataLength: dataLen,
-		Data:       data[8:end],
+		Data:       data[8:end:end],
 	}
 
 	return resp, nil

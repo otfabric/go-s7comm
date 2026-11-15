@@ -99,7 +99,9 @@ func closeCOTP(conn *cotp.Conn) error {
 }
 
 // performS7Setup runs S7 Setup Communication on an open TP0 connection.
-// pduRef is the PDU reference to use in the setup request header.
+// pduRef is the PDU reference to use in the setup request header. The PDU
+// size of the result is never above maxPDU: negotiation can only lower what
+// was proposed, so a larger size in the answer counts as maxPDU.
 func performS7Setup(ctx context.Context, conn *cotp.Conn, pduRef uint16, maxAmqCalling, maxAmqCalled, maxPDU int) (*wire.SetupCommResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -124,6 +126,9 @@ func performS7Setup(ctx context.Context, conn *cotp.Conn, pduRef uint16, maxAmqC
 	if header.PDURef != pduRef {
 		return nil, &PDURefMismatchError{Expected: pduRef, Got: header.PDURef}
 	}
+	if err := checkAnswerType(req, header); err != nil {
+		return nil, err
+	}
 	if header.ErrorClass != 0 || header.ErrorCode != 0 {
 		return nil, wire.NewS7ErrorWithParam(header.ErrorClass, header.ErrorCode, paramData)
 	}
@@ -134,5 +139,6 @@ func performS7Setup(ctx context.Context, conn *cotp.Conn, pduRef uint16, maxAmqC
 	if err != nil {
 		return nil, fmt.Errorf("parse setup response: %w", errors.Join(err, ErrProtocolFailure))
 	}
+	setup.PDUSize = min(setup.PDUSize, maxPDU)
 	return setup, nil
 }

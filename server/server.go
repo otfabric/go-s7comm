@@ -84,6 +84,8 @@ type Server struct {
 	closed    bool
 	wg        sync.WaitGroup
 	slots     chan struct{}
+
+	afterAddConn func()
 }
 
 // New returns a Server with no areas registered.
@@ -177,16 +179,24 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 			_ = raw.Close()
 			return ErrServerClosed
 		}
-		s.wg.Go(func() {
+		// A test seam: afterAddConn, when a test has set it, runs between
+		// registering the connection and starting its goroutine.
+		if s.afterAddConn != nil {
+			s.afterAddConn()
+		}
+		go func() {
+			defer s.wg.Done() // counted by addConn
 			defer func() { <-s.slots }()
 			defer s.removeConn(raw)
 			s.serveConn(raw)
-		})
+		}()
 	}
 }
 
 // Close stops all listeners and closes every connection, then waits for
-// their goroutines. It is safe to call more than once.
+// their goroutines: when it returns, no goroutine of an accepted connection
+// is running or still to start. Close is safe to call more than once and
+// from multiple goroutines; every call waits and returns nil.
 func (s *Server) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -229,6 +239,10 @@ func (s *Server) untrack(ln net.Listener) {
 	_ = ln.Close()
 }
 
+// addConn registers c and counts its goroutine in wg, unless the server is
+// closed. The count is taken under mu, which Close holds while it marks the
+// server closed: Close therefore waits for every connection it finds
+// registered, also one whose goroutine has not started yet.
 func (s *Server) addConn(c net.Conn) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -236,6 +250,7 @@ func (s *Server) addConn(c net.Conn) bool {
 		return false
 	}
 	s.conns[c] = struct{}{}
+	s.wg.Add(1)
 	return true
 }
 

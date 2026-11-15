@@ -181,7 +181,12 @@ func TestNewFailedReadResult(t *testing.T) {
 }
 
 func BenchmarkPlanReadChunks(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		_ = planReadChunks(4096, 200)
+	b.ReportAllocs()
+	var chunks []int
+	for b.Loop() {
+		chunks = planReadChunks(4096, 200)
+	}
+	if len(chunks) != 21 {
+		b.Fatalf("%d chunks, want 21", len(chunks))
 	}
 }

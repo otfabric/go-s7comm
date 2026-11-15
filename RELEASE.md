@@ -1,5 +1,46 @@
 # go-s7comm Releases
 
+## v0.16.4
+
+**Date:** 2026-11-15
+**Previous release:** v0.16.3
+
+No API change. Several behaviours change; each is listed under "Changed".
+
+### Changed
+
+- The negotiated PDU size is at most the proposed one (`WithMaxPDU`, default 480): negotiation can only lower the proposal, so a larger size in the setup answer counts as the proposal. `ProbeRackSlots`, which proposes 480, reports no larger size.
+- An answer is at most as long as the negotiated PDU size (the proposed size when the setup answer grants 0). A longer one is refused with an error that matches `ErrProtocolFailure`, and a strict rack/slot probe does not take it as a confirmation. The recorded CPUs fill the negotiated size exactly and never exceed it.
+- `ListBlocks` refuses a list of more than 65,536 entries, the number of 16-bit block numbers. `BlockCounts` sizes its map for at most 256 block types. `UploadBlock` collects at most 8 MiB, next to its limit of 4,096 segments. SECURITY.md lists every limit with the test that asserts it.
+- A call whose context ends after its request was sent, or whose transport fails, ends the session: the client closes the connection and clears the session, and later calls return `ErrNotConnected` until `Connect` succeeds again. The call itself returns the same error as before. This is what ERRORS.md, API.md, LIMITATIONS.md and README.md described; the session used to stay in place. `ConnectionInfo()` and `PDUSize()` report zero values afterwards. A context that has already ended when a call starts sends nothing and leaves the session open, and so does an answer that arrives and is refused.
+- `ProbeReadableRanges`: after a probe that timed out, the remaining offsets are reported as `transport-error` (`ErrNotConnected`) without being sent, as the comment of `RangeProbeRequest.Timeout` says.
+- `ProbeReadableRanges` returns `*ValidationError` for a range outside the S7 byte address space (`0 <= Start <= End <= 2097152`), before anything is sent. Such a range used to return one failed probe per offset.
+- `UploadBlock` asks for each segment once. A failed request for a segment was repeated up to three times; the CPU answers each request with the next segment, so the upload now ends at the first failure, with the error `upload chunk N: …`.
+- An answer must be of a message type that answers the request: Ack-Data or Ack for a job, Setup Communication included, and user data (or an acknowledgement that refuses it) for a user data request. A user data answer must be a response of the function group and subfunction that were asked for, and an SZL answer must carry the SZL ID that was asked for; its index is not compared, because a recorded CPU answers a request for index 4 with index 0. Anything else is refused with an error that matches `ErrProtocolFailure`.
+- The error code in the parameter section of a user data answer is read. A refusal keeps its item return code in `S7Error.Code`, and its message now names the parameter error too, for example `object not available (parameter error 0xD209: one of the given blocks not found on module)`. An error code on an answer whose data section reports no refusal is returned as an `S7Error` with `Class` its high byte and `Code` its low byte.
+- `wire.ParseBlockInfoResponse`, and with it `GetBlockInfo`, refuses a block header whose load memory length or security field is above 2,147,483,647, so both fields hold the wire value on 32-bit platforms too.
+- `WriteArea` cuts a long write into chunks of an even number of bytes, so that a full chunk also fits an odd negotiated PDU size.
+- `wire`: the slices the decoders return (`ReadVarItem.Data`, the codes of `ParseWriteVarResponseCodes`, the payload of `ParseUserdataData`, `SZLResponse.Data`, `UploadChunk.Data`, `WriteVarData.Data`, what follows the header in `ParseS7Header`) have no capacity beyond their length: an append to one allocates. They are still borrowed from the input, which their comments now say.
+- Package `server`: `Close` also waits for a connection that `Serve` has accepted and whose goroutine has not started yet.
+
+### Documentation
+
+- SECURITY.md: "Limits on what a peer can send", one table of limits, where each is enforced and its test.
+- ERRORS.md, API.md, LIMITATIONS.md, README.md, ARCHITECTURE.md and OBSERVABILITY.md say when a session ends, that `Close` waits for the operation in flight and does not interrupt it, and what a `Logger` and a `Dialer` may call. The comments of `Client.Close`, `Server.Close`, `Logger` and `Dialer` say the same.
+- TESTING.md: the lifecycle contract matrix (L1 to L16) for `client.Client` and `server.Server`, the 32-bit and benchmark tiers, what the fuzz targets assert, and `SNAP_INTEROP_REQUIRE_DOCKER`.
+- API.md names go-cotp v1.4.1; docs/FEATURE-STATUS.md is at v0.16.4.
+
+### Tests
+
+- `client`: `answer_limits_test.go` (each limit at and past its boundary, with allocation budgets), `session_test.go` (the lifecycle rows, replacing two tests that slept), `answer_checks_test.go`, `ownership_test.go`, range bounds in `rangescan_test.go`; fuzz targets `FuzzSZLRecords` and `FuzzUserdataAnswers`.
+- `server`: `lifecycle_test.go` (`testing/synctest` over in-memory connections), `TestWriteLargerThanThePDUAtEvenAndOddSizes`, `TestMemoryIsNotSharedWithTheCaller`.
+- `wire`: `TestParseBlockInfo32BitFields`, `ownership_test.go`; eight fuzz targets assert what an accepted input means and take seeds from the recorded traffic; the benchmarks decode recorded answers and report allocations.
+- `client`: the benchmarks of `Discover`, `ProbeRackSlots` and `CompareRead` run against an in-process peer through the dialer options (`BenchmarkE2E…`).
+- The interop suite fails without Docker when `SNAP_INTEROP_REQUIRE_DOCKER=1`, which `make interop` and the Interop workflow set.
+- Workflows: `extended.yml` runs `GOARCH=386 go test -count=1 ./...` and every benchmark once (`make bench-smoke`) nightly.
+
+---
+
 ## v0.16.3
 
 **Date:** 2026-11-14

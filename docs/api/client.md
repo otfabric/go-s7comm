@@ -67,19 +67,19 @@ ProbeReadableRanges runs over a single client connection; probes are serialized.
 
 #### Retry and resilience {#hdr-Retry_and_resilience}
 
-Retry semantics differ by API: UploadBlock retries failed chunk reads (transient errors only; protocol/parse failures fail fast). Range probes support Retries and Repeat for stability. ReadArea, WriteArea, and CompareRead have no built-in retry; callers can wrap calls in their own backoff/retry if needed.
+No request is repeated by the client: ReadArea, WriteArea, CompareRead and UploadBlock (one request per segment) return the first failure. Range probes support Retries and Repeat for stability. Callers can wrap calls in their own backoff/retry if needed. A call that is given up after its request was sent (its context ended, or the transport failed) ends the session, so a retry starts with Connect.
 
 #### Concurrency {#hdr-Concurrency}
 
-Concurrent use is safe, but all protocol operations are serialized per client instance. Only one request or connection transition is in flight at a time; long operations (e.g. UploadBlock) block other reads and writes on that client. Typical use: Connect once, perform operations, then Close. Calling methods after Close may return ErrNotConnected or transport errors.
+Concurrent use is safe, but all protocol operations are serialized per client instance. Only one request or connection transition is in flight at a time; long operations (e.g. UploadBlock) block other reads and writes on that client. Typical use: Connect once, perform operations, then Close. Calling methods after Close returns ErrNotConnected. Close is safe to call more than once and from multiple goroutines; it waits for the operation in flight and does not interrupt it. A Logger and a Dialer run while an operation is in flight: they may call ConnectionInfo and PDUSize, and must not call an operation, Connect or Close of the same client.
 
 #### Reconnection {#hdr-Reconnection}
 
-Reconnecting after transport failure or intentional Close is supported: call Close() then Connect(ctx) again. The client does not auto-reconnect; callers must call Connect after Close to resume use.
+Reconnecting after transport failure or intentional Close is supported: call Connect(ctx) again. The client does not auto-reconnect. A transport failure, and a call whose context ends after its request was sent, end the session (see Connect): calls then return ErrNotConnected until Connect succeeds.
 
 #### Negotiated PDU size {#hdr-Negotiated_PDU_size}
 
-ConnectionInfo() is the canonical source for negotiated connection state; ConnectionInfo().PDUSize is the negotiated maximum S7 PDU payload length (bytes). PDUSize() is a shorthand for it. All request sizing and chunk planning use this value; sendReceive rejects any request whose S7 payload length exceeds it.
+ConnectionInfo() is the canonical source for negotiated connection state; ConnectionInfo().PDUSize is the negotiated maximum S7 PDU payload length (bytes). PDUSize() is a shorthand for it. All request sizing and chunk planning use this value; sendReceive rejects any request whose S7 payload length exceeds it, and any answer longer than it. It is never above the size proposed with WithMaxPDU. SECURITY.md lists every limit on what a peer can send.
 
 Package client provides a high-level S7 client API.
 
@@ -153,13 +153,21 @@ BlockCounts returns how many blocks of each type the CPU holds (block functions,
 func (c *Client) Close() error
 ```
 
-Close closes the connection
+Close ends the session and closes the connection. On a client that is not connected it does nothing and returns nil. Close is safe to call more than once and from multiple goroutines.
+
+Close waits for the operation in flight on this client (a read, a write, an upload, Connect) and does not interrupt it: to end a blocked call, cancel its context. It must not be called from a Logger or a Dialer of this client, which run while the operation is in flight.
 
 #### func (Client) Connect
 
 ```go
 func (c *Client) Connect(ctx context.Context) error
 ```
+
+Connect dials the host, completes the COTP handshake and S7 Setup Communication, and makes the new session the client's. A session that is already in place is replaced, and its connection closed, only after the new one is set up; a failed Connect leaves it as it was.
+
+A session ends with Close, and when a later call is given up after its request was sent: its context ended, or the transport failed. The answer to that request may still arrive, and the next request on the same connection would read it, so the client closes the connection. Calls then return ErrNotConnected until Connect succeeds again. A context that has already ended when a call starts sends nothing and leaves the session open, and so does an answer that arrives and is refused.
+
+The negotiated PDU size (PDUSize) is at most the size proposed with WithMaxPDU, and an answer longer than it is refused with an error that matches ErrProtocolFailure.
 
 #### func (Client) ConnectionInfo
 
@@ -215,7 +223,7 @@ ListAllBlocks is best-effort and may return partial results with aggregated erro
 func (c *Client) ListBlocks(ctx context.Context, bt model.BlockType) ([]model.BlockInfo, error)
 ```
 
-ListBlocks returns the blocks of one type (block functions, list blocks of type), all packets of the list.
+ListBlocks returns the blocks of one type (block functions, list blocks of type), all packets of the list. A list of more than 65,536 entries, the number of 16-bit block numbers, is refused with an error that matches ErrProtocolFailure.
 
 #### func (Client) PDUSize
 
@@ -231,7 +239,7 @@ PDUSize returns the negotiated PDU size
 func (c *Client) ProbeReadableRanges(ctx context.Context, req RangeProbeRequest) (*RangeProbeResult, error)
 ```
 
-ProbeReadableRanges scans the area in the configured range and consolidates adjacent readable probes into spans. The client must be connected when the range is non-empty. The scan is read-only. Invalid request (start > end, negative DBNumber for DB area) returns an error.
+ProbeReadableRanges scans the area in the configured range and consolidates adjacent readable probes into spans. The client must be connected when the range is non-empty. The scan is read-only. Invalid request (start > end, a range outside the S7 byte addresses 0..2097151, negative DBNumber for DB area) returns a ValidationError before anything is sent.
 
 #### func (Client) ReadArea
 
@@ -311,7 +319,7 @@ ReadOutputs reads from the output area. Returns \*ReadResult; use result.OK() an
 func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (*model.BlockData, error)
 ```
 
-UploadBlock uploads a block from the PLC. Block numbers must be in 0..65535. An unknown block type returns ValidationError without sending a request. It performs a best-effort end-upload cleanup before returning; this may add a short delay on completion. Cleanup errors are not returned to the caller; cleanup uses a 500ms timeout to limit that delay.
+UploadBlock uploads a block from the PLC. Block numbers must be in 0..65535. An unknown block type returns ValidationError without sending a request. Each segment is requested once: a request for a segment is not repeated, because the CPU answers each one with the next segment. An upload of more than 4,096 segments or 8 MiB is refused. It performs a best-effort end-upload cleanup before returning; this may add a short delay on completion. Cleanup errors are not returned to the caller; cleanup uses a 500ms timeout to limit that delay. When the upload ended the session (see Connect), the cleanup sends nothing.
 
 #### func (Client) WriteArea
 
@@ -443,6 +451,8 @@ type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
 Dialer opens the transport connection to addr ("host:port"). It receives network "tcp". Like net.Dialer, it returns a non-nil connection exactly when the error is nil.
 
+The Dialer of WithDialer runs inside Connect, while the client holds the lock that serialises its operations: it may call ConnectionInfo and PDUSize of that client, and must not call one of its operations, Connect or Close, which would wait for that lock and not return.
+
 ### type DiscoverOption
 
 ```go
@@ -553,6 +563,8 @@ type Logger interface {
 ```
 
 Logger is an optional printf-style sink for client diagnostics. Nil (the default when WithLogger is omitted) disables logging. Methods are invoked synchronously on the request path and must not block. Args follow fmt.Sprintf conventions (e.g. Error("Connect failed: %v", err)). Use NewSlogLogger to adapt a slog.Handler without changing this interface.
+
+The methods run while the client holds the lock that serialises its operations. They may call ConnectionInfo and PDUSize of that client; they must not call one of its operations, Connect or Close, which would wait for that lock and not return.
 
 #### func NewSlogLogger
 
@@ -818,8 +830,10 @@ ProbeRackSlots probes a single target IP for valid rack/slot combinations. It is
 
 ```go
 type RangeProbeRequest struct {
-	Area        model.Area
-	DBNumber    int
+	Area     model.Area
+	DBNumber int
+	// Start and End bound the scanned byte offsets, [Start, End). Both lie
+	// in the S7 byte address space: 0 <= Start <= End <= 2097152.
 	Start       int
 	End         int
 	Step        int // distance between probe offsets; if 0, use ProbeSize
@@ -830,7 +844,8 @@ type RangeProbeRequest struct {
 	Interval    time.Duration
 	Parallelism int // max concurrent probes; if <=0, sequential. API compatibility only—connection-backed probes are serialized, no concurrent wire I/O.
 	// Timeout bounds each probe read. 0 = 5s. A probe that times out ends the
-	// session (see LIMITATIONS.md), so the remaining probes fail fast.
+	// session (see ERRORS.md), so the remaining probes are not sent: each is
+	// reported as transport-error with ErrNotConnected.
 	Timeout time.Duration
 }
 ```

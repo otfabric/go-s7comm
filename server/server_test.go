@@ -277,3 +277,34 @@ func TestListenAndServeBadAddress(t *testing.T) {
 		t.Fatal("ListenAndServe on a bad address succeeded")
 	}
 }
+
+// A write longer than one PDU is cut into chunks that fit the negotiated
+// size, whether that size is even or odd: every chunk is accepted and the
+// data reads back.
+func TestWriteLargerThanThePDUAtEvenAndOddSizes(t *testing.T) {
+	srv, err := server.New(server.Config{MaxPDUSize: 960})
+	must(t, err)
+	must(t, srv.RegisterDB(1, make([]byte, 2048), server.AreaOptions{}))
+	port := start(t, srv)
+	for _, pdu := range []int{240, 241, 242, 479, 480, 481, 959, 960} {
+		c := dial(t, port, client.WithMaxPDU(pdu))
+		if got := c.PDUSize(); got != pdu {
+			t.Fatalf("PDU size %d, want %d", got, pdu)
+		}
+		const overhead = 28 // header 10, parameter 14, data header 4
+		for _, n := range []int{pdu - overhead - 1, pdu - overhead, pdu - overhead + 1, 2*(pdu-overhead) + 1} {
+			want := make([]byte, n)
+			for i := range want {
+				want[i] = byte(pdu + n + i)
+			}
+			if err := c.WriteDB(context.Background(), 1, 3, want); err != nil {
+				t.Errorf("PDU size %d: write of %d bytes: %v", pdu, n, err)
+				continue
+			}
+			if got := readDB(t, c, 1, 3, n); !bytes.Equal(got, want) {
+				t.Errorf("PDU size %d: %d bytes read back differ from what was written", pdu, n)
+			}
+		}
+		_ = c.Close()
+	}
+}

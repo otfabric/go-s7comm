@@ -14,24 +14,23 @@ import (
 )
 
 const (
-	maxUploadChunks  = 4096
-	maxUploadRetries = 3
+	// maxUploadChunks bounds the segments of one upload.
+	maxUploadChunks = 4096
+	// maxUploadBytes bounds the bytes one upload collects. The segments of
+	// an upload at the largest PDU size classic CPUs grant (960) carry
+	// less than half of it.
+	maxUploadBytes = 8 << 20
+	// maxBlockListEntries is the number of blocks of one type a CPU can
+	// hold: a block number is 16 bits.
+	maxBlockListEntries = 1 << 16
+	// maxBlockTypes is the number of block types a one-byte type code names.
+	maxBlockTypes = 1 << 8
 )
 
-// isUploadProtocolError reports whether the error is a protocol/parse failure (do not retry).
-func isUploadProtocolError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrProtocolFailure) {
-		return true
-	}
-	var s7Err *wire.S7Error
-	return errors.As(err, &s7Err)
-}
-
 // ListBlocks returns the blocks of one type (block functions, list
-// blocks of type), all packets of the list.
+// blocks of type), all packets of the list. A list of more than 65,536
+// entries, the number of 16-bit block numbers, is refused with an error
+// that matches ErrProtocolFailure.
 func (c *Client) ListBlocks(ctx context.Context, bt model.BlockType) ([]model.BlockInfo, error) {
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()
@@ -40,6 +39,9 @@ func (c *Client) ListBlocks(ctx context.Context, bt model.BlockType) ([]model.Bl
 	_, payload, err := c.userdata(ctx, wire.EncodeBlockListRequest(ref, byte(bt)), ref, wire.UserdataGroupBlock, wire.UserdataBlockList)
 	if err != nil {
 		return nil, err
+	}
+	if n := len(payload) / 4; n > maxBlockListEntries {
+		return nil, fmt.Errorf("block list of %d entries, at most %d: %w", n, maxBlockListEntries, ErrProtocolFailure)
 	}
 	entries, err := wire.ParseBlockListResponse(payload)
 	if err != nil {
@@ -72,11 +74,18 @@ func (c *Client) BlockCounts(ctx context.Context) (map[model.BlockType]int, erro
 	if err != nil {
 		return nil, errors.Join(err, ErrProtocolFailure)
 	}
-	out := make(map[model.BlockType]int, len(counts))
+	return blockCountMap(counts), nil
+}
+
+// blockCountMap keys counts by block type. A type code is one byte, so the
+// map is sized for at most maxBlockTypes entries, however many the answer
+// holds; an answer that names a type twice keeps the last count.
+func blockCountMap(counts []wire.BlockCount) map[model.BlockType]int {
+	out := make(map[model.BlockType]int, min(len(counts), maxBlockTypes))
 	for _, bc := range counts {
 		out[model.BlockType(bc.BlockType)] = bc.Count
 	}
-	return out, nil
+	return out
 }
 
 // ListAllBlocks is best-effort and may return partial results with aggregated errors.
@@ -156,8 +165,12 @@ func (c *Client) GetBlockInfo(ctx context.Context, bt model.BlockType, num int) 
 
 // UploadBlock uploads a block from the PLC. Block numbers must be in 0..65535.
 // An unknown block type returns ValidationError without sending a request.
+// Each segment is requested once: a request for a segment is not repeated,
+// because the CPU answers each one with the next segment. An upload of more
+// than 4,096 segments or 8 MiB is refused.
 // It performs a best-effort end-upload cleanup before returning; this may add a short delay on completion.
 // Cleanup errors are not returned to the caller; cleanup uses a 500ms timeout to limit that delay.
+// When the upload ended the session (see Connect), the cleanup sends nothing.
 func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (*model.BlockData, error) {
 	if num < 0 || num > 0xFFFF {
 		return nil, &ValidationError{Message: fmt.Sprintf("block number %d out of range (0..65535)", num)}
@@ -197,40 +210,21 @@ func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (
 	chunkCount := 0
 	done := false
 	for i := range maxUploadChunks {
-		var chunk *wire.UploadChunk
-		var lastErr error
-		for range maxUploadRetries {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			chunkRef := c.nextPDURef()
-			req = wire.EncodeUploadRequest(chunkRef, start.UploadID)
-			param, data, e := c.sendReceive(ctx, req, chunkRef)
-			if e != nil {
-				if isUploadProtocolError(e) {
-					return nil, fmt.Errorf("upload chunk %d: %w", i, e)
-				}
-				lastErr = e
-				continue
-			}
-
-			chunk, e = wire.ParseUploadResponse(param, data)
-			if e != nil {
-				e = fmt.Errorf("parse upload response: %w", errors.Join(e, ErrProtocolFailure))
-				if isUploadProtocolError(e) {
-					return nil, fmt.Errorf("upload chunk %d: %w", i, e)
-				}
-				lastErr = e
-				continue
-			}
-			lastErr = nil
-			break
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-
-		if lastErr != nil {
-			return nil, fmt.Errorf("upload chunk %d failed after %d retries (received %d bytes so far): %w", i, maxUploadRetries, payload.Len(), lastErr)
+		chunkRef := c.nextPDURef()
+		param, data, err := c.sendReceive(ctx, wire.EncodeUploadRequest(chunkRef, start.UploadID), chunkRef)
+		if err != nil {
+			return nil, fmt.Errorf("upload chunk %d: %w", i, err)
 		}
-
+		chunk, err := wire.ParseUploadResponse(param, data)
+		if err != nil {
+			return nil, fmt.Errorf("upload chunk %d: parse upload response: %w", i, errors.Join(err, ErrProtocolFailure))
+		}
+		if len(chunk.Data) > maxUploadBytes-payload.Len() {
+			return nil, fmt.Errorf("upload chunk %d: block longer than %d bytes: %w", i, maxUploadBytes, ErrProtocolFailure)
+		}
 		if len(chunk.Data) > 0 {
 			_, _ = payload.Write(chunk.Data)
 			chunkCount++

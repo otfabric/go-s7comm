@@ -18,7 +18,10 @@ type Logger interface {
 - **Style** — printf-style: `msg` is a format string; `args` are for `fmt.Sprintf`
   (e.g. `Error("Connect failed: %v", err)`).
 - **Cost** — callbacks run **synchronously** on the request path (Connect,
-  upload cleanup, …). Keep implementations non-blocking.
+  upload cleanup, …), while the client holds its request lock. Keep
+  implementations non-blocking. A callback may call `ConnectionInfo` and
+  `PDUSize` of the client; an operation, `Connect` or `Close` of the same
+  client called from a callback does not return.
 - **Adapter** — `client.NewSlogLogger(handler)` wraps any `slog.Handler`.
   `NewSlogLogger(nil)` is a no-op logger.
 
@@ -43,6 +46,7 @@ See [API.md](API.md) (Client options) for `WithLogger` / `NewSlogLogger`.
 
 ## Context and cancellation
 
-Cancel and deadline behaviour (including session abort on mid-I/O cancel) is
-documented in [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency) and the
-README.
+Cancel and deadline behaviour (a call given up after its request was sent
+ends the session) is documented in
+[ERRORS.md](ERRORS.md#context-reconnect-and-concurrency) and the README. The
+client logs nothing when a session ends this way: the call's own error says so.
