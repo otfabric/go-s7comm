@@ -44,9 +44,10 @@ func (e *PDURefMismatchError) Error() string {
 // Locking. reqLock serialises the calls (the operations and Connect): a call
 // holds it from beginCall to endCall, and callGen belongs to the holder. mu
 // guards the session fields (conn, rack, slot, TSAPs, PDU size, AmQ),
-// closeGen (how often Close was called) and cancelConnect (the Connect in
-// flight, nil when none). A call takes reqLock first and mu inside it; Close
-// takes mu only, so it never waits for a call.
+// closeGen (how often Close was called) and cancelConnect (the cancel of the
+// Connect or the pause of WithRateLimit in flight, nil when none). A call
+// takes reqLock first and mu inside it; Close takes mu only, so it never
+// waits for a call.
 
 // Client is an S7 protocol client. rack and slot hold the negotiated/detected values
 // for the current connection; options are immutable after construction.
@@ -486,10 +487,10 @@ func splitS7Payload(header *wire.S7Header, rest []byte) (param, data []byte, ok 
 // Close ends the call in flight on this client and does not wait for it: a
 // read, a write, an upload or Connect, also one that waits for its turn,
 // returns an error that matches ErrClosed (a read: status transport-error).
-// A call waiting for the peer returns at once; one in a pause of
-// WithRateLimit returns when the pause is over. Close may be called from a
-// Logger or a Dialer of this client. Calls made after Close return
-// ErrNotConnected until Connect succeeds again.
+// A call waiting for the peer returns at once, and so does one in a pause of
+// WithRateLimit, which sends nothing more. Close may be called from a Logger
+// or a Dialer of this client. Calls made after Close return ErrNotConnected
+// until Connect succeeds again.
 func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

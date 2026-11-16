@@ -1,5 +1,26 @@
 # go-s7comm Releases
 
+## v0.17.1
+
+**Date:** 2026-11-16
+**Previous release:** v0.17.0
+
+Patch release. No API change; one behaviour of `Close` changes, under "Changed".
+
+### Changed
+
+- **`Close` ends a pause of `WithRateLimit` at once.** A read or a write of several chunks that is in the pause between two chunks when `Close` is called now returns an error that matches `ErrClosed` at once (reads: `ReadResult` with status `transport-error`) and sends no further chunk. Before, it returned the same error only when the pause was over, at most the configured delay later, also without sending. A call whose context ends during the pause returns that context's error, as before. Who notices: code that measures how long such a call takes after `Close`.
+
+### Documentation
+
+- The comment of `Client.Close`, API.md, ERRORS.md, LIMITATIONS.md and ARCHITECTURE.md no longer list the pause as an exception; TESTING.md row L3 names the new tests.
+
+### Tests
+
+- `client/session_test.go` (`testing/synctest`): `TestCloseEndsAPauseOfTheRateLimit` (a read and a write paused for an hour between two chunks return `ErrClosed` when `Close` is called, with no time passed, and the peer receives one request), `TestAPauseOfTheRateLimitEndsWithItsContext` (a deadline during the pause ends the call after exactly that long with `context.DeadlineExceeded`, and the session stays open).
+
+---
+
 ## v0.17.0
 
 **Date:** 2026-11-16

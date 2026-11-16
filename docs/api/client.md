@@ -165,7 +165,7 @@ func (c *Client) Close() error
 
 Close ends the session and closes the connection. On a client that is not connected it closes nothing and returns nil. Close is safe to call more than once and from multiple goroutines.
 
-Close ends the call in flight on this client and does not wait for it: a read, a write, an upload or Connect, also one that waits for its turn, returns an error that matches ErrClosed (a read: status transport-error). A call waiting for the peer returns at once; one in a pause of WithRateLimit returns when the pause is over. Close may be called from a Logger or a Dialer of this client. Calls made after Close return ErrNotConnected until Connect succeeds again.
+Close ends the call in flight on this client and does not wait for it: a read, a write, an upload or Connect, also one that waits for its turn, returns an error that matches ErrClosed (a read: status transport-error). A call waiting for the peer returns at once, and so does one in a pause of WithRateLimit, which sends nothing more. Close may be called from a Logger or a Dialer of this client. Calls made after Close return ErrNotConnected until Connect succeeds again.
 
 #### func (Client) Connect
 

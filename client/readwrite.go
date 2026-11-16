@@ -104,10 +104,8 @@ func (c *Client) ReadArea(ctx context.Context, addr model.Address) (*ReadResult,
 			return newFailedReadResult(reqLen, err), nil
 		}
 		if rateLimit > 0 && !firstChunk {
-			select {
-			case <-ctx.Done():
-				return newFailedReadResult(reqLen, ctx.Err()), nil
-			case <-time.After(rateLimit):
+			if err := c.ratePause(ctx, rateLimit); err != nil {
+				return newFailedReadResult(reqLen, err), nil
 			}
 		}
 		firstChunk = false
@@ -186,6 +184,39 @@ func (c *Client) ReadArea(ctx context.Context, addr model.Address) (*ReadResult,
 	return out, nil
 }
 
+// ratePause waits d, the pause of WithRateLimit before the next chunk, in the
+// client's turn. It returns ctx's error when ctx ends first, and ErrClosed
+// when Close comes before or during the pause. Close cancels the pause as it
+// cancels a Connect in flight: through cancelConnect, which belongs to the
+// call that holds the turn.
+func (c *Client) ratePause(ctx context.Context, d time.Duration) error {
+	pauseCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	c.mu.Lock()
+	closed := c.closedLocked()
+	if !closed {
+		c.cancelConnect = cancel
+	}
+	c.mu.Unlock()
+	if closed {
+		return ErrClosed
+	}
+	defer func() {
+		c.mu.Lock()
+		c.cancelConnect = nil
+		c.mu.Unlock()
+	}()
+	select {
+	case <-pauseCtx.Done():
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return ErrClosed
+	case <-time.After(d):
+		return nil
+	}
+}
+
 // ClassifyReadOutcome returns the ReadStatus for a read that requested requested bytes and returned returned bytes.
 // Intentional: requested <= 0 is treated as success (no bytes requested, so no short/empty semantics).
 func ClassifyReadOutcome(requested, returned int) ReadStatus {
@@ -238,10 +269,8 @@ func (c *Client) WriteArea(ctx context.Context, addr model.Address, data []byte)
 			return err
 		}
 		if rateLimit > 0 && !firstChunk {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(rateLimit):
+			if err := c.ratePause(ctx, rateLimit); err != nil {
+				return err
 			}
 		}
 		firstChunk = false

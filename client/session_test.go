@@ -610,6 +610,128 @@ func TestCloseEndsACallWaitingForItsTurn(t *testing.T) {
 	})
 }
 
+// twoChunkCalls are a read and a write of 500 bytes: two chunks each with the
+// PDU size of 480 that pipePeers grants, so WithRateLimit pauses between them.
+// A read reports its status; a write reports "".
+var twoChunkCalls = []struct {
+	name string
+	call func(ctx context.Context, c *Client) (ReadStatus, error)
+}{
+	{"ReadDB", func(ctx context.Context, c *Client) (ReadStatus, error) {
+		res, err := c.ReadDB(ctx, 1, 0, 500)
+		if err != nil {
+			return "", err
+		}
+		return res.Status, res.Err()
+	}},
+	{"WriteDB", func(ctx context.Context, c *Client) (ReadStatus, error) {
+		return "", c.WriteDB(ctx, 1, 0, make([]byte, 500))
+	}},
+}
+
+// readWritePipePeers answers every Read Var and Write Var request in full and
+// counts the requests that arrived.
+func readWritePipePeers(t *testing.T) (peers *pipePeers, requests *atomic.Int32) {
+	t.Helper()
+	requests = new(atomic.Int32)
+	peers = &pipePeers{op: func(ref uint16, req []byte) []byte {
+		requests.Add(1)
+		if req[wire.S7HeaderSize] == wire.FuncWriteVar {
+			return buildWriteVarResponse(ref, wire.RetCodeSuccess)
+		}
+		return answerReadsAndSZL(ref, req)
+	}}
+	t.Cleanup(peers.wait)
+	return peers, requests
+}
+
+// Close ends a pause of WithRateLimit at once: a read or a write in the pause
+// between its two chunks returns ErrClosed (a read: status transport-error)
+// when Close is called, with no time passed on the bubble's clock, and does
+// not send its second chunk.
+func TestCloseEndsAPauseOfTheRateLimit(t *testing.T) {
+	for _, tc := range twoChunkCalls {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				peers, requests := readWritePipePeers(t)
+				c := pipeClient(t, peers, WithRateLimit(time.Hour))
+				type result struct {
+					status ReadStatus
+					err    error
+				}
+				done := make(chan result, 1)
+				start := time.Now()
+				go func() {
+					status, err := tc.call(context.Background(), c)
+					done <- result{status, err}
+				}()
+				synctest.Wait() // the first chunk is answered; the call pauses
+				if n := requests.Load(); n != 1 {
+					t.Fatalf("the peer received %d requests before the pause, want 1", n)
+				}
+
+				if err := c.Close(); err != nil {
+					t.Errorf("Close: %v", err)
+				}
+				synctest.Wait()
+				var r result
+				select {
+				case r = <-done:
+				default:
+					t.Error("the call in a pause of WithRateLimit did not return when Close was called")
+					r = <-done // when the pause is over on the bubble's clock
+				}
+				if elapsed := time.Since(start); elapsed != 0 {
+					t.Errorf("the call returned after %v, want 0", elapsed)
+				}
+				if !errors.Is(r.err, ErrClosed) {
+					t.Errorf("err = %v, want ErrClosed", r.err)
+				}
+				if r.status != "" && r.status != ReadStatusTransportErr {
+					t.Errorf("status %s, want transport-error", r.status)
+				}
+				if n := requests.Load(); n != 1 {
+					t.Errorf("the peer received %d requests, want 1", n)
+				}
+				requireDisconnected(t, c)
+			})
+		})
+	}
+}
+
+// A call whose context ends in a pause of WithRateLimit returns that
+// context's error (a read: status timeout) when it ends, does not send its
+// second chunk and leaves the session open.
+func TestAPauseOfTheRateLimitEndsWithItsContext(t *testing.T) {
+	for _, tc := range twoChunkCalls {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				peers, requests := readWritePipePeers(t)
+				c := pipeClient(t, peers, WithRateLimit(time.Hour))
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				start := time.Now()
+				status, err := tc.call(ctx, c)
+				if elapsed := time.Since(start); elapsed != time.Second {
+					t.Errorf("the call returned after %v, want the deadline of 1s", elapsed)
+				}
+				if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrClosed) {
+					t.Errorf("err = %v, want context.DeadlineExceeded alone", err)
+				}
+				if status != "" && status != ReadStatusTimeout {
+					t.Errorf("status %s, want timeout", status)
+				}
+				if n := requests.Load(); n != 1 {
+					t.Errorf("the peer received %d requests, want 1", n)
+				}
+				if res, err := c.ReadDB(context.Background(), 1, 0, 2); err != nil || !res.OK() {
+					t.Errorf("next read: %v, %v; want the session open", res, err)
+				}
+			})
+		})
+	}
+}
+
 // A call that waits for its turn behind the call in flight returns its
 // context's error when that context ends, for every operation and Connect,
 // and sends nothing. The call in flight and its session are not disturbed.

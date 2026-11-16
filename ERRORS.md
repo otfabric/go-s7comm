@@ -315,9 +315,9 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
   called, also one waiting for its turn, returns an error that matches
   `ErrClosed` (reads: status `transport-error`); one that was waiting for the
   peer also matches `cotp.ErrClosed`. A call in a pause of `WithRateLimit`
-  returns when the pause is over. A `Connect` that `Close` ended leaves no
-  session, also when it was to replace one. Calls made after `Close` return
-  `ErrNotConnected` until `Connect` succeeds again.
+  returns at once too, and sends nothing more. A `Connect` that `Close`
+  ended leaves no session, also when it was to replace one. Calls made after
+  `Close` return `ErrNotConnected` until `Connect` succeeds again.
 - A `Logger` and a `Dialer` run on the goroutine of the call that invokes
   them, while that call holds the client's turn. They may call
   `ConnectionInfo`, `PDUSize` and `Close`; `Close` ends that call as any call
