@@ -32,8 +32,10 @@ const (
 // entries, the number of 16-bit block numbers, is refused with an error
 // that matches ErrProtocolFailure.
 func (c *Client) ListBlocks(ctx context.Context, bt model.BlockType) ([]model.BlockInfo, error) {
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return nil, err
+	}
+	defer c.endCall()
 
 	ref := c.nextPDURef()
 	_, payload, err := c.userdata(ctx, wire.EncodeBlockListRequest(ref, byte(bt)), ref, wire.UserdataGroupBlock, wire.UserdataBlockList)
@@ -62,8 +64,10 @@ func (c *Client) ListBlocks(ctx context.Context, bt model.BlockType) ([]model.Bl
 // BlockCounts returns how many blocks of each type the CPU holds (block
 // functions, list blocks), keyed by block type.
 func (c *Client) BlockCounts(ctx context.Context) (map[model.BlockType]int, error) {
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return nil, err
+	}
+	defer c.endCall()
 
 	ref := c.nextPDURef()
 	_, payload, err := c.userdata(ctx, wire.EncodeBlockCountRequest(ref), ref, wire.UserdataGroupBlock, wire.UserdataBlockCount)
@@ -130,8 +134,10 @@ func (c *Client) GetBlockInfo(ctx context.Context, bt model.BlockType, num int) 
 	if num < 0 || num > wire.MaxUploadBlockNumber {
 		return nil, &ValidationError{Message: fmt.Sprintf("block number %d out of range (0..%d)", num, wire.MaxUploadBlockNumber)}
 	}
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return nil, err
+	}
+	defer c.endCall()
 
 	ref := c.nextPDURef()
 	req, err := wire.EncodeBlockInfoRequest(ref, byte(bt), num)
@@ -175,8 +181,10 @@ func (c *Client) UploadBlock(ctx context.Context, bt model.BlockType, num int) (
 	if num < 0 || num > 0xFFFF {
 		return nil, &ValidationError{Message: fmt.Sprintf("block number %d out of range (0..65535)", num)}
 	}
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return nil, err
+	}
+	defer c.endCall()
 
 	ref := c.nextPDURef()
 	req, err := wire.EncodeStartUploadRequest(ref, byte(bt), num)

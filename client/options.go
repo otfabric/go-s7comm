@@ -13,21 +13,22 @@ import (
 type Option func(*options)
 
 type options struct {
-	port          int
-	rack          int
-	slot          int
-	localTSAP     uint16
-	remoteTSAP    uint16
-	useExplicit   bool
-	autoRackSlot  bool
-	bruteRackSlot bool
-	timeout       time.Duration
-	rateLimit     time.Duration
-	logger        Logger
-	maxPDU        int
-	maxAmqCalling int
-	maxAmqCalled  int
-	dialer        Dialer
+	port           int
+	rack           int
+	slot           int
+	localTSAP      uint16
+	remoteTSAP     uint16
+	useExplicit    bool
+	autoRackSlot   bool
+	bruteRackSlot  bool
+	timeout        time.Duration
+	requestTimeout time.Duration
+	rateLimit      time.Duration
+	logger         Logger
+	maxPDU         int
+	maxAmqCalling  int
+	maxAmqCalled   int
+	dialer         Dialer
 }
 
 // Logger is an optional printf-style sink for client diagnostics.
@@ -36,10 +37,15 @@ type options struct {
 // Args follow fmt.Sprintf conventions (e.g. Error("Connect failed: %v", err)).
 // Use NewSlogLogger to adapt a slog.Handler without changing this interface.
 //
-// The methods run while the client holds the lock that serialises its
-// operations. They may call ConnectionInfo and PDUSize of that client; they
-// must not call one of its operations, Connect or Close, which would wait
-// for that lock and not return.
+// The methods run on the goroutine of the call that logs (Connect, the
+// cleanup of UploadBlock), while that call holds the client's turn. They may
+// call ConnectionInfo, PDUSize and Close of that client; Close ends the call
+// that logs, as it ends any call in flight. They must not call an operation
+// or Connect of that client: such a call waits for the call that logs, so it
+// returns only when its own context ends, with that context's error. A method
+// that does not return normally is not recovered by the client: the
+// unwinding reaches the caller of the call that logs, and the client's turn
+// is given back, so the client stays usable.
 type Logger interface {
 	Debug(msg string, args ...any)
 	Info(msg string, args ...any)
@@ -89,9 +95,27 @@ func WithAutoRackSlot(brute bool) Option {
 	}
 }
 
-// WithTimeout sets the connection/operation timeout
+// WithTimeout bounds Connect: the dial, the COTP handshake and S7 Setup
+// Communication (default 5s; 0 = no bound beyond the context). It does not
+// bound the requests after Connect: see WithRequestTimeout.
 func WithTimeout(t time.Duration) Option {
 	return func(o *options) { o.timeout = t }
+}
+
+// WithRequestTimeout bounds each request after Connect: sending one request
+// PDU and waiting for its answer. A call of several requests (a read or a
+// write larger than the PDU, an SZL list or block list of several packets,
+// an upload) applies it to each of them. The call's context still bounds
+// the whole call, and the earlier deadline wins. The pauses of
+// WithRateLimit and the wait for the client's turn are not requests.
+//
+// A request that runs out of time returns an error that matches
+// context.DeadlineExceeded (a read: status timeout) and, once the request
+// was sent, ends the session as a context deadline does (see Connect).
+// 0, the default, sets no bound: a call is bounded by its context alone.
+// Connect refuses a negative value with ValidationError.
+func WithRequestTimeout(d time.Duration) Option {
+	return func(o *options) { o.requestTimeout = d }
 }
 
 // WithRateLimit sets a minimal delay between sequential protocol operations.
@@ -108,10 +132,15 @@ func WithLogger(l Logger) Option {
 // network "tcp". Like net.Dialer, it returns a non-nil connection exactly when
 // the error is nil.
 //
-// The Dialer of WithDialer runs inside Connect, while the client holds the
-// lock that serialises its operations: it may call ConnectionInfo and
-// PDUSize of that client, and must not call one of its operations, Connect
-// or Close, which would wait for that lock and not return.
+// The Dialer of WithDialer runs on the goroutine of Connect, while Connect
+// holds the client's turn. It may call ConnectionInfo, PDUSize and Close of
+// that client; Close ends the Connect that runs the Dialer, which then
+// returns an error that matches ErrClosed. It must not call an operation or
+// Connect of that client: such a call waits for the Connect that runs the
+// Dialer, so it returns only when its own context ends, with that context's
+// error. A Dialer that does not return normally is not recovered by the
+// client: the unwinding reaches the caller of Connect, the session in place
+// (if any) is kept, and the client's turn is given back.
 type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
 // WithDialer sets the function that opens the TCP connection of Connect, for

@@ -4,14 +4,18 @@ package client
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/otfabric/go-cotp"
 	"github.com/otfabric/go-s7comm/model"
 	"github.com/otfabric/go-s7comm/wire"
 )
@@ -410,83 +414,263 @@ func TestCloseFromSeveralGoroutines(t *testing.T) {
 	requireDisconnected(t, c)
 }
 
-// L3, L4. Close waits for the call in flight and does not end it: the call
-// ends by its own context, then Close returns nil and the client is
-// disconnected. (Ending the call from Close is planned as a behaviour
-// change of a later minor release; TESTING.md records the row.)
-func TestCloseWaitsForTheCallInFlight(t *testing.T) {
-	p := startHeldPeer(t, cpuStateRun)
-	var dialer closeCountingDialer
-	c := New("127.0.0.1", WithPort(p.port), WithRackSlot(0, 1), WithDialer(dialer.dial))
-	if err := c.Connect(testContext(t)); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	callDone := make(chan error, 1)
-	go func() {
-		_, err := c.GetCPUState(ctx)
-		callDone <- err
-	}()
-	waitFor(t, p.arrived, "the request to arrive")
+// L3. Close ends the call in flight and does not wait for it: Close returns
+// while the peer still holds the answer, and the call returns an error that
+// matches ErrClosed and go-cotp's ErrClosed (a read: status
+// transport-error). The connection is closed once and the client ends
+// disconnected.
+func TestCloseEndsTheCallInFlight(t *testing.T) {
+	for _, tc := range oneRequestCalls {
+		t.Run(tc.name, func(t *testing.T) {
+			p := startHeldPeer(t, cpuStateRun) // the answer is released only by the cleanup
+			var dialer closeCountingDialer
+			c := New("127.0.0.1", WithPort(p.port), WithRackSlot(0, 1), WithDialer(dialer.dial))
+			if err := c.Connect(testContext(t)); err != nil {
+				t.Fatalf("Connect: %v", err)
+			}
+			type result struct {
+				status ReadStatus
+				err    error
+			}
+			callDone := make(chan result, 1)
+			go func() {
+				status, err := tc.call(context.Background(), c)
+				callDone <- result{status, err}
+			}()
+			waitFor(t, p.arrived, "the request to arrive")
 
-	// The call holds the client's request lock until its context ends, so
-	// Close cannot return before cancel is called below.
-	type closed struct {
-		err          error
-		callHadEnded bool
+			closeDone := make(chan error, 1)
+			go func() { closeDone <- c.Close() }()
+			if err := waitFor(t, closeDone, "Close to return while the answer is held"); err != nil {
+				t.Errorf("Close: %v", err)
+			}
+			got := waitFor(t, callDone, "the call in flight to return")
+			if !errors.Is(got.err, ErrClosed) || !errors.Is(got.err, cotp.ErrClosed) {
+				t.Errorf("call in flight: err = %v, want ErrClosed and cotp.ErrClosed", got.err)
+			}
+			if got.status != "" && got.status != ReadStatusTransportErr {
+				t.Errorf("call in flight: status %s, want transport-error", got.status)
+			}
+			if n := dialer.closes.Load(); n != 1 {
+				t.Errorf("connection closed %d times, want 1", n)
+			}
+			requireDisconnected(t, c)
+			if n := p.requests.Load(); n != 1 {
+				t.Errorf("the peer received %d requests, want 1", n)
+			}
+		})
 	}
-	closeDone := make(chan closed, 1)
-	go func() {
-		err := c.Close()
-		closeDone <- closed{err: err, callHadEnded: ctx.Err() != nil}
-	}()
-	cancel()
-	if err := waitFor(t, callDone, "the call in flight to return"); !errors.Is(err, context.Canceled) {
-		t.Errorf("call in flight: err = %v, want context.Canceled", err)
-	}
-	got := waitFor(t, closeDone, "Close to return")
-	if got.err != nil || !got.callHadEnded {
-		t.Errorf("Close = %v, returned after the call had ended: %v", got.err, got.callHadEnded)
-	}
-	if n := dialer.closes.Load(); n != 1 {
-		t.Errorf("connection closed %d times, want 1", n)
-	}
-	requireDisconnected(t, c)
 }
 
-// L5. Close during Connect waits for it: Connect completes, then Close ends
-// the new session. The client is disconnected and its connection closed.
-func TestCloseDuringConnectWaitsAndDisconnects(t *testing.T) {
-	setupArrived := make(chan struct{}, 1)
-	gate := make(chan struct{})
-	release := sync.OnceFunc(func() { close(gate) })
-	port := startScriptedPeer(t, func(ref uint16) []byte {
-		setupArrived <- struct{}{}
-		<-gate
-		return buildS7SetupResponse(ref, 480)
-	}, cpuStateRun)
-	t.Cleanup(release)
+// L4. Close ends a write that the peer does not take: the client is blocked
+// writing the request into an in-memory pipe that the peer no longer reads.
+// The write returns ErrClosed, and no octet of the request reached the peer,
+// so no partial PDU is followed by another on the stream.
+func TestCloseEndsAWriteInFlight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stop := make(chan struct{})
+		peerRead := make(chan error, 1)
+		dial := func(context.Context, string, string) (net.Conn, error) {
+			clientEnd, serverEnd := net.Pipe()
+			go func() {
+				defer func() { _ = serverEnd.Close() }()
+				ctx := context.Background()
+				srv, err := cotp.Accept(ctx, serverEnd, cotp.ServerConfig{MaxTPDULength: 1024})
+				if err != nil {
+					peerRead <- err
+					return
+				}
+				defer func() { _ = srv.Close() }()
+				req, err := srv.ReadTSDU(ctx)
+				if err == nil {
+					err = srv.WriteTSDU(ctx, buildS7SetupResponse(binary.BigEndian.Uint16(req[4:6]), 480))
+				}
+				if err != nil {
+					peerRead <- err
+					return
+				}
+				<-stop // reads nothing until the client's write has ended
+				req, err = srv.ReadTSDU(ctx)
+				if err == nil {
+					err = fmt.Errorf("the peer received %d octets of a request", len(req))
+				}
+				peerRead <- err
+			}()
+			return clientEnd, nil
+		}
+		c := New("plc", WithRackSlot(0, 1), WithDialer(dial))
+		if err := c.Connect(context.Background()); err != nil {
+			t.Fatalf("Connect: %v", err)
+		}
+		writeDone := make(chan error, 1)
+		go func() { writeDone <- c.WriteDB(context.Background(), 1, 0, make([]byte, 64)) }()
+		synctest.Wait() // the write waits for the peer to read
 
-	var dialer closeCountingDialer
-	c := New("127.0.0.1", WithPort(port), WithRackSlot(0, 1), WithDialer(dialer.dial))
-	connectDone := make(chan error, 1)
-	go func() { connectDone <- c.Connect(context.Background()) }()
-	waitFor(t, setupArrived, "the setup request to arrive") // Connect holds the request lock from here on
+		if err := c.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+		if err := <-writeDone; !errors.Is(err, ErrClosed) || !errors.Is(err, cotp.ErrClosed) {
+			t.Errorf("write in flight: err = %v, want ErrClosed and cotp.ErrClosed", err)
+		}
+		close(stop)
+		if err := <-peerRead; err == nil || strings.Contains(err.Error(), "octets of a request") {
+			t.Errorf("peer: %v; want the end of the stream and no request", err)
+		}
+		requireDisconnected(t, c)
+	})
+}
 
-	closeDone := make(chan error, 1)
-	go func() { closeDone <- c.Close() }()
-	release()
-	if err := waitFor(t, connectDone, "Connect to return"); err != nil {
-		t.Fatalf("Connect: %v", err)
+// L5. Close ends a Connect in flight, held at the setup answer, and does not
+// wait for it: Connect returns an error that matches ErrClosed, the
+// connection it opened is closed, and no session is left, also when Connect
+// was to replace a session, which Close ends too.
+func TestCloseEndsAConnectInFlight(t *testing.T) {
+	for _, replacing := range []bool{false, true} {
+		name := "first Connect"
+		if replacing {
+			name = "Connect replacing a session"
+		}
+		t.Run(name, func(t *testing.T) {
+			var setups atomic.Int32
+			setupArrived := make(chan struct{}, 1)
+			gate := make(chan struct{})
+			release := sync.OnceFunc(func() { close(gate) })
+			heldSetup := int32(1)
+			if replacing {
+				heldSetup = 2
+			}
+			port := startScriptedPeer(t, func(ref uint16) []byte {
+				if setups.Add(1) == heldSetup {
+					setupArrived <- struct{}{}
+					<-gate
+				}
+				return buildS7SetupResponse(ref, 480)
+			}, cpuStateRun)
+			t.Cleanup(release)
+
+			var dialer closeCountingDialer
+			c := New("127.0.0.1", WithPort(port), WithRackSlot(0, 1), WithDialer(dialer.dial))
+			if replacing {
+				if err := c.Connect(testContext(t)); err != nil {
+					t.Fatalf("first Connect: %v", err)
+				}
+			}
+			connectDone := make(chan error, 1)
+			go func() { connectDone <- c.Connect(context.Background()) }()
+			waitFor(t, setupArrived, "the setup request to arrive")
+
+			closeDone := make(chan error, 1)
+			go func() { closeDone <- c.Close() }()
+			if err := waitFor(t, closeDone, "Close to return while the setup answer is held"); err != nil {
+				t.Errorf("Close: %v", err)
+			}
+			if err := waitFor(t, connectDone, "Connect to return"); !errors.Is(err, ErrClosed) {
+				t.Errorf("Connect = %v, want ErrClosed", err)
+			}
+			if dials, closes := dialer.dials.Load(), dialer.closes.Load(); closes != dials {
+				t.Errorf("%d connections dialled, %d closed; want every one closed", dials, closes)
+			}
+			requireDisconnected(t, c)
+		})
 	}
-	if err := waitFor(t, closeDone, "Close to return"); err != nil {
-		t.Fatalf("Close: %v", err)
+}
+
+// Close also ends a call that waits for its turn behind the call in flight:
+// every call in flight when Close is called returns ErrClosed, the waiting
+// read and Connect without sending anything.
+func TestCloseEndsACallWaitingForItsTurn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		peers, requests := silentPipePeers(t)
+		c := pipeClient(t, peers)
+		errs := make(chan error, 3)
+		go func() { _, err := c.GetCPUState(context.Background()); errs <- err }()
+		synctest.Wait() // the first call waits for its answer
+		go func() {
+			res, err := c.ReadDB(context.Background(), 1, 0, 2)
+			if err == nil {
+				err = res.Err()
+			}
+			errs <- err
+		}()
+		go func() { errs <- c.Connect(context.Background()) }()
+		synctest.Wait() // the read and Connect wait for their turn
+
+		if err := c.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+		for range 3 {
+			if err := <-errs; !errors.Is(err, ErrClosed) {
+				t.Errorf("call in flight: err = %v, want ErrClosed", err)
+			}
+		}
+		if n := requests.Load(); n != 1 {
+			t.Errorf("the peer received %d requests, want 1", n)
+		}
+		requireDisconnected(t, c)
+	})
+}
+
+// A call that waits for its turn behind the call in flight returns its
+// context's error when that context ends, for every operation and Connect,
+// and sends nothing. The call in flight and its session are not disturbed.
+func TestCallWaitingForItsTurnEndsWithItsContext(t *testing.T) {
+	p := startHeldPeer(t, cpuStateRun)
+	c := connectScripted(t, p.port)
+	t.Cleanup(p.release) // before the client's Close, should the test stop early
+	first := make(chan error, 1)
+	go func() {
+		st, err := c.GetCPUState(context.Background())
+		if err == nil && st != model.CPUStateRun {
+			err = fmt.Errorf("state %v", st)
+		}
+		first <- err
+	}()
+	waitFor(t, p.arrived, "the first request to arrive")
+
+	waiting := map[string]func(ctx context.Context) error{
+		"ReadDB": func(ctx context.Context) error {
+			res, err := c.ReadDB(ctx, 1, 0, 2)
+			if err != nil {
+				return err
+			}
+			if res.Status != ReadStatusTimeout {
+				return fmt.Errorf("status %s, want timeout", res.Status)
+			}
+			return res.Err()
+		},
+		"WriteDB":            func(ctx context.Context) error { return c.WriteDB(ctx, 1, 0, []byte{1}) },
+		"ReadDBBit":          func(ctx context.Context) error { _, err := c.ReadDBBit(ctx, 1, 0, 0); return err },
+		"WriteDBBit":         func(ctx context.Context) error { return c.WriteDBBit(ctx, 1, 0, 0, true) },
+		"GetCPUState":        func(ctx context.Context) error { _, err := c.GetCPUState(ctx); return err },
+		"GetProtectionLevel": func(ctx context.Context) error { _, err := c.GetProtectionLevel(ctx); return err },
+		"Identify":           func(ctx context.Context) error { _, err := c.Identify(ctx); return err },
+		"ReadDiagBufferRaw":  func(ctx context.Context) error { _, err := c.ReadDiagBufferRaw(ctx); return err },
+		"ListBlocks":         func(ctx context.Context) error { _, err := c.ListBlocks(ctx, model.BlockDB); return err },
+		"BlockCounts":        func(ctx context.Context) error { _, err := c.BlockCounts(ctx); return err },
+		"GetBlockInfo":       func(ctx context.Context) error { _, err := c.GetBlockInfo(ctx, model.BlockDB, 1); return err },
+		"UploadBlock":        func(ctx context.Context) error { _, err := c.UploadBlock(ctx, model.BlockDB, 1); return err },
+		"Connect":            func(ctx context.Context) error { return c.Connect(ctx) },
 	}
-	if dials, closes := dialer.dials.Load(), dialer.closes.Load(); dials != 1 || closes != 1 {
-		t.Errorf("%d connections dialled, %d closed; want 1 and 1", dials, closes)
+	for name, call := range waiting {
+		ctx, expire := newExpiringContext()
+		done := make(chan error, 1)
+		go func() { done <- call(ctx) }()
+		expire()
+		if err := waitFor(t, done, name+" waiting for its turn to return"); !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("%s: err = %v, want context.DeadlineExceeded", name, err)
+		}
 	}
-	requireDisconnected(t, c)
+
+	p.release()
+	if err := waitFor(t, first, "the call in flight to return"); err != nil {
+		t.Errorf("call in flight: %v", err)
+	}
+	if n := p.requests.Load(); n != 1 {
+		t.Errorf("the peer received %d requests, want 1: a call that waited sent nothing", n)
+	}
+	if c.PDUSize() != 480 {
+		t.Errorf("PDU size %d after the waiting calls, want the session of 480 in place", c.PDUSize())
+	}
 }
 
 // snapshotLogger records what ConnectionInfo and PDUSize return when they
@@ -552,3 +736,194 @@ func TestCallbacksMayReadConnectionInfo(t *testing.T) {
 		t.Errorf("PDU size the dialer saw = %v, want [0 480]", dialerSaw)
 	}
 }
+
+// closingLogger calls Close of its client from the method named in on, once,
+// and reports what Close returned on closed.
+type closingLogger struct {
+	c      *Client
+	on     string
+	closed chan error
+}
+
+func (l *closingLogger) log(method string) {
+	if method == l.on && l.c != nil {
+		c := l.c
+		l.c = nil
+		l.closed <- c.Close()
+	}
+}
+
+func (l *closingLogger) Debug(string, ...any) { l.log("Debug") }
+func (l *closingLogger) Info(string, ...any)  { l.log("Info") }
+func (l *closingLogger) Error(string, ...any) { l.log("Error") }
+
+// uploadPeer answers an upload of one segment and its end.
+func uploadPeer(ref uint16, req []byte) []byte {
+	switch req[wire.S7HeaderSize] {
+	case wire.FuncUploadStart:
+		return buildStartUploadResponse(ref, 7)
+	case wire.FuncUpload:
+		return buildUploadChunkResponse(ref, []byte{1, 2, 3, 4}, true)
+	case wire.FuncUploadEnd:
+		return buildAckData(ref, 0, 0, []byte{wire.FuncUploadEnd}, nil)
+	}
+	return cpuStateRun(ref, req)
+}
+
+// L10. A Logger and a Dialer may call Close of their client: Close returns,
+// and so does the call that runs the callback. Close ends that call as it
+// ends any call in flight; the client ends disconnected with every
+// connection closed.
+func TestCallbacksMayCloseTheClient(t *testing.T) {
+	t.Run("Logger during UploadBlock", func(t *testing.T) {
+		port := startScriptedPeer(t, nil, uploadPeer)
+		logger := &closingLogger{on: "Debug", closed: make(chan error, 1)}
+		var dialer closeCountingDialer
+		c := New("127.0.0.1", WithPort(port), WithRackSlot(0, 1), WithLogger(logger), WithDialer(dialer.dial))
+		if err := c.Connect(testContext(t)); err != nil {
+			t.Fatalf("Connect: %v", err)
+		}
+		logger.c = c
+		type upload struct {
+			block *model.BlockData
+			err   error
+		}
+		done := make(chan upload, 1)
+		go func() {
+			block, err := c.UploadBlock(testContext(t), model.BlockDB, 1)
+			done <- upload{block, err}
+		}()
+		if err := waitFor(t, logger.closed, "Close called from the Logger to return"); err != nil {
+			t.Errorf("Close from the Logger: %v", err)
+		}
+		// The Logger runs in the cleanup, after the block was received.
+		if got := waitFor(t, done, "UploadBlock to return"); got.err != nil || got.block == nil || len(got.block.Data) != 4 {
+			t.Errorf("UploadBlock = %+v, %v; want the block of 4 bytes", got.block, got.err)
+		}
+		if n := dialer.closes.Load(); n != 1 {
+			t.Errorf("connection closed %d times, want 1", n)
+		}
+		requireDisconnected(t, c)
+	})
+
+	t.Run("Logger on a failed Connect", func(t *testing.T) {
+		var setups atomic.Int32
+		port := startScriptedPeer(t, func(ref uint16) []byte {
+			if setups.Add(1) == 2 {
+				return buildAckData(ref, wire.ErrClassResource, 0x02, nil, nil)
+			}
+			return buildS7SetupResponse(ref, 480)
+		}, cpuStateRun)
+		logger := &closingLogger{on: "Error", closed: make(chan error, 1)}
+		var dialer closeCountingDialer
+		c := New("127.0.0.1", WithPort(port), WithRackSlot(0, 1), WithLogger(logger), WithDialer(dialer.dial))
+		if err := c.Connect(testContext(t)); err != nil {
+			t.Fatalf("Connect: %v", err)
+		}
+		logger.c = c
+		done := make(chan error, 1)
+		go func() { done <- c.Connect(testContext(t)) }()
+		if err := waitFor(t, logger.closed, "Close called from the Logger to return"); err != nil {
+			t.Errorf("Close from the Logger: %v", err)
+		}
+		// The Logger runs after the attempt failed: Connect returns that failure.
+		if err := waitFor(t, done, "Connect to return"); err == nil || errors.Is(err, ErrClosed) {
+			t.Errorf("Connect = %v, want the setup refusal", err)
+		}
+		if dials, closes := dialer.dials.Load(), dialer.closes.Load(); dials != 2 || closes != 2 {
+			t.Errorf("%d connections dialled, %d closed; want 2 and 2", dials, closes)
+		}
+		requireDisconnected(t, c)
+	})
+
+	t.Run("Dialer", func(t *testing.T) {
+		port := startScriptedPeer(t, nil, cpuStateRun)
+		var c *Client
+		var counting closeCountingDialer
+		dialerClosed := make(chan error, 1)
+		c = New("127.0.0.1", WithPort(port), WithRackSlot(0, 1),
+			WithDialer(func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if counting.dials.Load() == 1 {
+					dialerClosed <- c.Close()
+					// Dial without the context, which Close has ended: Connect
+					// must close a connection that a Dialer returns all the same.
+					ctx = context.Background()
+				}
+				return counting.dial(ctx, network, addr)
+			}))
+		if err := c.Connect(testContext(t)); err != nil {
+			t.Fatalf("Connect: %v", err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- c.Connect(testContext(t)) }()
+		if err := waitFor(t, dialerClosed, "Close called from the Dialer to return"); err != nil {
+			t.Errorf("Close from the Dialer: %v", err)
+		}
+		if err := waitFor(t, done, "Connect to return"); !errors.Is(err, ErrClosed) {
+			t.Errorf("Connect = %v, want ErrClosed", err)
+		}
+		if dials, closes := counting.dials.Load(), counting.closes.Load(); dials != 2 || closes != 2 {
+			t.Errorf("%d connections dialled, %d closed; want 2 and 2", dials, closes)
+		}
+		requireDisconnected(t, c)
+	})
+}
+
+// A Dialer or a Logger that does not return normally is not recovered by the
+// client: the unwinding reaches the caller of Connect. The session in place
+// is kept and the client's turn is given back, so the next call is answered.
+func TestCallbackUnwindingReachesTheCaller(t *testing.T) {
+	connectRecovering := func(c *Client) (recovered any) {
+		defer func() { recovered = recover() }()
+		_ = c.Connect(testContext(t))
+		return nil
+	}
+	t.Run("Dialer", func(t *testing.T) {
+		port := startScriptedPeer(t, nil, cpuStateRun)
+		var dials atomic.Int32
+		c := New("127.0.0.1", WithPort(port), WithRackSlot(0, 1),
+			WithDialer(func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if dials.Add(1) == 2 {
+					panic("dialer")
+				}
+				var d net.Dialer
+				return d.DialContext(ctx, network, addr)
+			}))
+		t.Cleanup(func() { _ = c.Close() })
+		if err := c.Connect(testContext(t)); err != nil {
+			t.Fatalf("Connect: %v", err)
+		}
+		if got := connectRecovering(c); got != "dialer" {
+			t.Fatalf("recovered %v, want the value the Dialer raised", got)
+		}
+		if st, err := c.GetCPUState(testContext(t)); err != nil || st != model.CPUStateRun {
+			t.Errorf("next call = %v, %v; want RUN on the session in place", st, err)
+		}
+	})
+	t.Run("Logger", func(t *testing.T) {
+		var setups atomic.Int32
+		port := startScriptedPeer(t, func(ref uint16) []byte {
+			if setups.Add(1) == 2 {
+				return buildAckData(ref, wire.ErrClassResource, 0x02, nil, nil)
+			}
+			return buildS7SetupResponse(ref, 480)
+		}, cpuStateRun)
+		c := New("127.0.0.1", WithPort(port), WithRackSlot(0, 1), WithLogger(unwindingLogger{}))
+		t.Cleanup(func() { _ = c.Close() })
+		if err := c.Connect(testContext(t)); err != nil {
+			t.Fatalf("Connect: %v", err)
+		}
+		if got := connectRecovering(c); got != "logger" {
+			t.Fatalf("recovered %v, want the value the Logger raised", got)
+		}
+		if st, err := c.GetCPUState(testContext(t)); err != nil || st != model.CPUStateRun {
+			t.Errorf("next call = %v, %v; want RUN on the session in place", st, err)
+		}
+	})
+}
+
+type unwindingLogger struct{}
+
+func (unwindingLogger) Debug(string, ...any) { panic("logger") }
+func (unwindingLogger) Info(string, ...any)  { panic("logger") }
+func (unwindingLogger) Error(string, ...any) { panic("logger") }

@@ -13,10 +13,10 @@ What go-s7comm does not do, or does only partly. API behaviour is in [API.md](AP
 
 ## Behaviour to plan for
 
-- `WithTimeout` bounds `Connect`, not later reads and writes: without a context deadline or cancel, open-session I/O can block indefinitely.
+- `WithTimeout` bounds `Connect`, not later reads and writes. `WithRequestTimeout` (default 0: none) bounds each request after `Connect`; without it, a context deadline or cancel, open-session I/O to a peer that stops answering without closing the connection blocks until the transport fails or `Close` ends the call.
 - A call whose context ends after its request was sent, and a transport failure during a call, end the session: the client closes the connection, and later calls return `ErrNotConnected` until `Connect` succeeds again ([ERRORS.md](ERRORS.md#context-reconnect-and-concurrency)). There is no automatic reconnect.
-- `Close` waits for the operation in flight on the client; it does not end a blocked call. Cancel the call's context for that.
-- A `Logger` or `Dialer` must not call an operation, `Connect` or `Close` of the client it is set on: it runs while the client holds its request lock, and such a call does not return. `ConnectionInfo` and `PDUSize` may be called.
+- `Close` ends the call in flight on the client, and a call waiting for its turn, with `ErrClosed`; it does not wait for them. A call in a pause of `WithRateLimit` returns when the pause is over.
+- A `Logger` or `Dialer` may call `ConnectionInfo`, `PDUSize` and `Close` of the client it is set on, and must not call an operation or `Connect` of it: it runs while the client's turn is held by the call that invokes it, so such a call waits for that call and returns only when its own context ends.
 - Protocol operations are serialised per client; `RangeProbeRequest.Parallelism` gives no wire-level concurrency.
 
 ## Verification

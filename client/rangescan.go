@@ -112,7 +112,7 @@ func (c *Client) ProbeReadableRanges(ctx context.Context, req RangeProbeRequest)
 	}
 
 	observations := make([]ReadProbeObservation, len(offsets))
-	// Connection-backed probes are serialized by reqMu; force sequential execution to match actual behavior.
+	// Connection-backed probes are serialized by the request lock; force sequential execution to match actual behavior.
 	for i, offset := range offsets {
 		if err := ctx.Err(); err != nil {
 			return out, err

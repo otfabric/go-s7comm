@@ -1,5 +1,39 @@
 # go-s7comm Releases
 
+## v0.17.0
+
+**Date:** 2026-11-16
+**Previous release:** v0.16.5
+
+Minor release. One option and one sentinel are added; no exported identifier is removed or changed. Three behaviours change: each is listed under "Breaking" with who notices it and what keeps the old outcome. The defaults are unchanged: without `WithRequestTimeout` a request is bounded by its context alone, as before.
+
+### Breaking
+
+- **`Close` ends the call in flight.** `Close` closes the connection at once and does not wait for the call in flight on the client: a read, a write, an upload or a user data request returns an error that matches the new `ErrClosed` (reads: status `transport-error`), and one that was waiting for the peer also matches `cotp.ErrClosed`. A call in a pause of `WithRateLimit` returns when the pause is over. A call waiting for its turn behind the call in flight returns `ErrClosed` too, without sending anything. Before, `Close` waited until the call in flight had ended by its context or by the peer, and that call returned its own result. This is the Close contract of the otfabric engineering lifecycle standard (rows L3 and L4). Who notices: a program that calls `Close` while another goroutine has a call in flight on the same client; that call now fails at once instead of completing. To keep the old outcome, end or await the call first (cancel its context, or wait for it to return), then call `Close`.
+- **`Close` ends a `Connect` in flight.** It cancels the dial, the COTP handshake or the S7 setup in progress; `Connect` returns an error that matches `ErrClosed`, closes the connection it opened and leaves no session, also when it was to replace one (which `Close` ends too). Before, `Close` waited for `Connect`, `Connect` returned nil and `Close` then ended the new session, so the client ended disconnected in both cases; only the result of `Connect` and the time `Close` takes differ (row L5). Who notices: code that checks the error of a `Connect` that runs concurrently with `Close`. To keep the old outcome, call `Close` after `Connect` has returned.
+- **A call that waits for its turn ends with its context.** The calls of one client run one at a time. A call whose context ends while it waits for its turn now returns that context's error at once (reads: `ReadResult` with status `timeout` for a deadline, `transport-error` for a cancel), sends nothing and leaves the session as it is. Before, it waited until the call in flight had ended and then returned the same error, or, for a read of zero bytes, success. Who notices: code that measures how long such a call takes; the error matches the same context error as before. To keep the old wait, pass a context without a deadline and without cancel.
+
+### Added
+
+- `client.WithRequestTimeout(d)`: bounds each request after `Connect`, sending one request PDU and waiting for its answer. A call of several requests (a read or a write larger than the PDU, an SZL list or block list of several packets, an upload) applies it to each request; the call's context still bounds the whole call, and the earlier deadline wins. A request that runs out of time returns an error that matches `context.DeadlineExceeded` (reads: status `timeout`) and, once the request was sent, ends the session as a context deadline does, so a peer that stops answering without closing the connection no longer holds a call without a deadline for ever. The pauses of `WithRateLimit`, the wait for the client's turn and `Connect` (which `WithTimeout` bounds) are not bounded by it. Default 0: no bound. `Connect` refuses a negative value with `*ValidationError`.
+- `client.ErrClosed`: the error of a call that was in flight when `Close` was called. A call made after `Close` returns `ErrNotConnected`, as before.
+
+### Changed
+
+- A `Logger` or a `Dialer` may call `Close` of its client: `Close` returns, and ends the call that runs the callback (a `Connect` ended from its `Dialer` returns `ErrClosed`). Before, such a `Close` did not return. An operation or `Connect` called from a callback still waits for the call that runs it, and now returns when its own context ends.
+
+### Documentation
+
+- The comments of `Client.Close`, `Connect`, `Logger`, `Dialer` and `WithTimeout` (it bounds `Connect`, not the requests after it), and the package doc ("Concurrency", "Time bounds"), state the Close contract, the callback contract (what a `Logger` or `Dialer` may call, and that one that does not return normally is not recovered by the client) and the time bounds.
+- ERRORS.md, API.md, ARCHITECTURE.md, LIMITATIONS.md, README.md, SECURITY.md and OBSERVABILITY.md say the same; TESTING.md rows L3, L4, L5, L9 and L10 name the tests; docs/FEATURE-STATUS.md is at v0.17.0.
+
+### Tests
+
+- `client/session_test.go`: `TestCloseEndsTheCallInFlight` (L3; read, write, bit read, user data, upload), `TestCloseEndsAWriteInFlight` (L4), `TestCloseEndsAConnectInFlight` (L5, first `Connect` and a replacing one), `TestCloseEndsACallWaitingForItsTurn`, `TestCallWaitingForItsTurnEndsWithItsContext` (every operation and `Connect`), `TestCallbacksMayCloseTheClient` (L10), `TestCallbackUnwindingReachesTheCaller`. They replace `TestCloseWaitsForTheCallInFlight` and `TestCloseDuringConnectWaitsAndDisconnects`, which pinned the old behaviour.
+- `client/request_timeout_test.go` (`testing/synctest`, in-memory pipes): each kind of request ends after exactly the request timeout, the earlier of it and the call's deadline wins, without it a call is still in flight after an hour, the bound is per request and not per call, it does not bound `Connect`, and `Connect` refuses a negative value and takes 0 up to the largest duration.
+
+---
+
 ## v0.16.5
 
 **Date:** 2026-11-16

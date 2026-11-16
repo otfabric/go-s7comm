@@ -29,7 +29,9 @@ Current release: **v0.7.5** (see [RELEASE.md](RELEASE.md)).
 | Request larger than negotiated PDU | `client.ErrRequestExceedsPDU` |
 | Malformed protocol framing | Often wraps `client.ErrProtocolFailure` |
 | An answer longer than the negotiated PDU size, of a message type that does not answer the request, of another user data function, or of another SZL list | Wraps `client.ErrProtocolFailure`; the session stays open |
-| A call given up after its request was sent (context ended, transport failed) | The context or transport error; the session ends and later calls return `client.ErrNotConnected` |
+| A call given up after its request was sent (context ended, request timeout, transport failed) | The context or transport error; the session ends and later calls return `client.ErrNotConnected` |
+| A call in flight when `Close` is called (also one waiting for its turn, and `Connect`) | Wraps `client.ErrClosed` (on reads: `ReadStatusTransportErr`); later calls return `client.ErrNotConnected` |
+| A call whose context ends while it waits for its turn behind another call | The context error (on reads: `ReadStatusTimeout` for a deadline); nothing is sent and the session stays open |
 | PLC header / item reject | `*wire.S7Error` (on reads: `ReadStatusRejected` + `ReturnCode`) |
 
 Prefer:
@@ -116,6 +118,7 @@ func (r *ReadResult) Err() error    // nil | ErrNilReadResult | *ReadOutcomeErro
 | Symbol | Kind | Notes |
 |--------|------|--------|
 | `ErrNotConnected` | sentinel | No active session: before `Connect`, after `Close`, and after a call that ended the session (see [Context, reconnect, and concurrency](#context-reconnect-and-concurrency)) |
+| `ErrClosed` | sentinel | The call was in flight when `Close` was called (running, waiting for its turn, or `Connect`); a call made after `Close` returns `ErrNotConnected` instead. A call that was waiting for the peer also matches go-cotp's `cotp.ErrClosed` |
 | `ErrRequestExceedsPDU` | sentinel | Request size > negotiated PDU |
 | `ErrProtocolFailure` | sentinel | Advanced/diagnostic; often wrapped on handshake/`sendReceive`/bit decode failures |
 | `ErrNilReadResult` | sentinel | `(*ReadResult)(nil).Err()` |
@@ -123,7 +126,7 @@ func (r *ReadResult) Err() error    // nil | ErrNilReadResult | *ReadOutcomeErro
 | `PDURefMismatchError` | typed | Response PDU ref ≠ expected; setup may return bare; request path often `errors.Join(ErrProtocolFailure, …)` |
 | `ReadOutcomeError` | typed | From `ReadResult.Err()`; `Unwrap()` → `Cause` |
 
-Stable and documented for application code: `ErrNotConnected`, `ErrRequestExceedsPDU`, `PDURefMismatchError`, `ValidationError`, and `ReadStatus` values. Prefer classifying reads by `Status` over matching every wrapped cause.
+Stable and documented for application code: `ErrNotConnected`, `ErrClosed`, `ErrRequestExceedsPDU`, `PDURefMismatchError`, `ValidationError`, and `ReadStatus` values. Prefer classifying reads by `Status` over matching every wrapped cause.
 
 ## Wire errors
 
@@ -209,6 +212,9 @@ if errors.As(err, &ve) { /* bad input */ }
 // Not connected (strict APIs or ReadResult.Cause)
 if errors.Is(err, client.ErrNotConnected) { /* … */ }
 
+// Ended by Close while in flight
+if errors.Is(err, client.ErrClosed) { /* … */ }
+
 // PDU size
 if errors.Is(err, client.ErrRequestExceedsPDU) { /* … */ }
 
@@ -266,8 +272,18 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
   the stream is still aligned, and the next call is answered.
 - Prefer `context.WithTimeout` / `WithDeadline` for wall-clock bounds on an
   operation. Client option `WithTimeout` applies to **Connect**/dial (and is
-  wrapped into the COTP and S7 setup contexts); it does **not** automatically bound later
-  `ReadArea` / `sendReceive` calls.
+  wrapped into the COTP and S7 setup contexts); it does **not** bound later
+  calls. `WithRequestTimeout(d)` (default 0: none) bounds each request after
+  Connect: sending one request PDU and waiting for its answer, each request
+  of a call of several (chunks, follow-up packets, upload segments)
+  separately. The earlier of it and the call's context deadline wins. A
+  request that runs out of time returns `context.DeadlineExceeded` (reads:
+  status `timeout`) and, once the request was sent, ends the session like a
+  context deadline. It does not bound the pauses of `WithRateLimit`, the
+  wait for the client's turn, or Connect.
+- A call waits for its turn while another call on the same client is in
+  flight. When its context ends while it waits, it returns that context's
+  error, sends nothing and leaves the session as it is.
 - A `Dialer` error is returned wrapped as `TCP connect: …`, so `errors.Is` /
   `errors.As` reach it. With `WithAutoRackSlot`, the final
   `auto rack/slot connect failed …` error wraps the last attempt's error.
@@ -275,8 +291,8 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
   `ReadResult.Cause`, `ProbeRackSlots` as the text of
   `RackSlotCandidate.Error` (stage `tcp`); `Discover` counts it as a failed
   rack/slot attempt.
-- Without cancel **and** without a deadline, open-session TSDU I/O can block
-  indefinitely.
+- Without cancel, a deadline **or** a request timeout, open-session TSDU I/O can block
+  indefinitely, until the transport fails or `Close` ends the call.
 - Rate-limit waits, multi-chunk loops, discover/probe between jobs, and
   auto rack/slot attempts honor `ctx.Err()` / `ctx.Done()`.
 - `UploadBlock` end-upload cleanup uses `context.WithTimeout(context.Background(), 500ms)`
@@ -289,11 +305,24 @@ For CLIs (e.g. s7commctl) that must map library outcomes to exit codes:
   a failed reconnect does not drop a healthy session.
 - The client does not auto-reconnect; after `Close`, a call that ended the
   session or a transport failure, call `Connect` again.
-- Concurrent use is safe, but protocol ops are serialized per client (`reqMu`);
-  long ops (e.g. `UploadBlock`) block other requests on that client.
+- Concurrent use is safe, but protocol ops are serialized per client (`reqLock`);
+  long ops (e.g. `UploadBlock`) block other requests on that client, which wait
+  for their turn until their context ends.
 - `Close` is safe to call more than once and from multiple goroutines. It
-  takes the same lock, so it waits for the operation in flight and does not
-  interrupt it: to end a blocked call, cancel its context. A `Logger` and a
-  `Dialer` run while that lock is held: they may call `ConnectionInfo` and
-  `PDUSize`; an operation, `Connect` or `Close` of the same client called from
-  one of them does not return.
+  ends the call in flight and does not wait for it: it closes the connection,
+  so a call waiting for the peer returns at once, and it ends a `Connect` in
+  flight (its dial, handshake or setup). Every call in flight when `Close` is
+  called, also one waiting for its turn, returns an error that matches
+  `ErrClosed` (reads: status `transport-error`); one that was waiting for the
+  peer also matches `cotp.ErrClosed`. A call in a pause of `WithRateLimit`
+  returns when the pause is over. A `Connect` that `Close` ended leaves no
+  session, also when it was to replace one. Calls made after `Close` return
+  `ErrNotConnected` until `Connect` succeeds again.
+- A `Logger` and a `Dialer` run on the goroutine of the call that invokes
+  them, while that call holds the client's turn. They may call
+  `ConnectionInfo`, `PDUSize` and `Close`; `Close` ends that call as any call
+  in flight. An operation or `Connect` of the same client called from one of
+  them waits for that call, so it returns only when its own context ends,
+  with that context's error. A callback that does not return normally is not
+  recovered by the client: the unwinding reaches the caller of the call,
+  which gives the client's turn back; the session in place is kept.

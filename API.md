@@ -65,10 +65,10 @@ Behavior notes:
 - The negotiated PDU size is at most the proposed one (`WithMaxPDU`, default 480): negotiation can only lower the proposal, so a larger size in the setup answer counts as the proposal. An answer longer than the negotiated size (the proposed size when the setup answer grants 0) is refused with an error that matches `ErrProtocolFailure`. All limits on what a peer can send are in [SECURITY.md](SECURITY.md#limits-on-what-a-peer-can-send).
 - An answer must be of a message type that answers the request: an acknowledgement (Ack-Data, or Ack) for a job, user data for a user data request. Anything else with the request's PDU reference is refused (`ErrProtocolFailure`).
 - A second Connect() on an already-connected client only replaces the session after the new handshake succeeds; a failed reconnect leaves the existing session intact.
-- **Context:** cancel (with or without deadline) is honored on dial (by a custom `Dialer` only if it honors `ctx`) and TSDU I/O via go-cotp. A call whose context ends after its request was sent, or whose transport fails, ends the session: the connection is closed, `ConnectionInfo()` reports zero values and later calls return `ErrNotConnected` until `Connect` succeeds again. A context that has already ended sends nothing and leaves the session as it is. `WithTimeout` bounds Connect, not later PDUs. See [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
+- **Context:** cancel (with or without deadline) is honored on dial (by a custom `Dialer` only if it honors `ctx`), TSDU I/O via go-cotp, and while a call waits for its turn behind another call on the client (it then returns the context's error and sends nothing). A call whose context ends after its request was sent, or whose transport fails, ends the session: the connection is closed, `ConnectionInfo()` reports zero values and later calls return `ErrNotConnected` until `Connect` succeeds again. A context that has already ended sends nothing and leaves the session as it is. `WithTimeout` bounds Connect, not later PDUs; `WithRequestTimeout` bounds each request after Connect. See [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
 - On setup failure of a new dial, that connection is closed; a prior healthy session is left intact until a successful swap.
-- Close maps a successful local go-cotp close (`cotp.ErrClosed`) to a nil error. It is safe to call more than once and from multiple goroutines, and returns nil on a client that is not connected. It waits for the operation in flight on the client and does not interrupt it; cancel that operation's context to end it.
-- Invalid caller input (port, timeout, max PDU, rack/slot) returns `*ValidationError`.
+- Close maps a successful local go-cotp close (`cotp.ErrClosed`) to a nil error. It is safe to call more than once and from multiple goroutines, and returns nil on a client that is not connected. It ends the call in flight on the client and does not wait for it: every call in flight when Close is called (a read, a write, an upload, `Connect`, also one waiting for its turn) returns an error that matches `ErrClosed` (reads: status `transport-error`). A call waiting for the peer returns at once and also matches `cotp.ErrClosed`; one in a pause of `WithRateLimit` returns when the pause is over. A `Connect` that Close ended leaves no session. Calls made after Close return `ErrNotConnected` until `Connect` succeeds again.
+- Invalid caller input (port, timeout, request timeout, max PDU, rack/slot) returns `*ValidationError`.
 - Request methods are serialized internally for protocol safety.
 
 ### Read result model
@@ -114,6 +114,7 @@ type ReadOutcomeError struct {
 
 var ErrNilReadResult     = errors.New("read result is nil")
 var ErrNotConnected      = errors.New("not connected")
+var ErrClosed            = errors.New("client closed") // the call was in flight when Close was called
 var ErrRequestExceedsPDU = errors.New("request exceeds negotiated PDU size")
 var ErrProtocolFailure   = errors.New("protocol failure") // advanced/diagnostic; handshake and request path wrap it
 
@@ -463,6 +464,7 @@ func WithRackSlot(rack, slot int) Option
 func WithTSAP(local, remote uint16) Option
 func WithAutoRackSlot(brute bool) Option
 func WithTimeout(t time.Duration) Option
+func WithRequestTimeout(d time.Duration) Option
 func WithRateLimit(d time.Duration) Option
 func WithLogger(l Logger) Option
 func WithDialer(d Dialer) Option
@@ -474,16 +476,22 @@ Defaults:
 
 - port: 102
 - rack/slot: 0/1
-- timeout: 5s
+- timeout: 5s (bounds Connect: dial, COTP handshake, S7 setup)
+- request timeout: 0 (none). `WithRequestTimeout(d)` bounds each request after Connect, sending one request PDU and waiting for its answer, each request of a call of several (chunks, follow-up packets, upload segments) separately; the earlier of `d` and the call's context deadline wins. A request that runs out of time returns `context.DeadlineExceeded` (reads: status `timeout`) and, once sent, ends the session. Connect refuses a negative `d` with `*ValidationError`
 - max PDU request: 480
 - max AMQ calling/called: 1
 - logger: nil (silent)
 - dialer: nil (`net.Dialer` with the timeout); a custom `Dialer` gets network `"tcp"`, `host:port` and a context carrying the timeout, and returns a non-nil connection exactly when the error is nil. The scan helpers have their own dialer: `WithDiscoverDialer`, `RackSlotProbeRequest.Dialer` and `CompareReadRequest.Dialer` (nil = `net.Dialer`)
 
-`Logger` is printf-style and optional; callbacks run synchronously on the request
-path, while the client holds its request lock, and so does a `Dialer`: they may call
-`ConnectionInfo` and `PDUSize`, and must not call an operation, `Connect` or `Close`
-of the same client, which would not return. `NewSlogLogger` adapts `log/slog` without changing the interface.
+`Logger` is printf-style and optional; callbacks run synchronously on the goroutine
+of the call that invokes them (`Connect`, the cleanup of `UploadBlock`), while that call
+holds the client's turn, and so does a `Dialer` (inside `Connect`). They may call
+`ConnectionInfo`, `PDUSize` and `Close`; `Close` ends the call that runs the callback, as
+it ends any call in flight (a `Connect` ended from its `Dialer` returns `ErrClosed`). They
+must not call an operation or `Connect` of the same client: such a call waits for the call
+that runs the callback and returns only when its own context ends. A callback that does not
+return normally is not recovered by the client: the unwinding reaches the caller, the
+client's turn is given back and the session in place is kept. `NewSlogLogger` adapts `log/slog` without changing the interface.
 `NewSlogLogger(nil)` is a no-op. See [OBSERVABILITY.md](OBSERVABILITY.md).
 
 `WithTSAP` selects explicit local/remote TSAPs (skips rack/slot packing). `WithAutoRackSlot` tries common rack/slot pairs (or a brute range when `brute` is true); when every pair fails, the error wraps the last attempt's error.

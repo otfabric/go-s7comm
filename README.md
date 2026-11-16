@@ -50,12 +50,15 @@ Full guide (statuses, sentinels, wire `S7Error`, CLI exit-code contract): **[ERR
 
 **Context:** cancel without a deadline **is** effective on TCP dial (with a
 custom `WithDialer`, only if it honours the context) and go-cotp
-TSDU I/O (via go-cotp’s deadline watcher). A call whose context ends after its
+TSDU I/O (via go-cotp’s deadline watcher), and while a call waits for its turn
+behind another call on the client. A call whose context ends after its
 request was sent **ends the session**: later calls return `ErrNotConnected`
 until `Connect` is called again. Prefer `context.WithTimeout` /
 `WithDeadline` for wall-clock bounds. Client `WithTimeout` bounds **Connect**
-(and dial), not ongoing PDU reads/writes; without cancel and without a deadline,
-open-session I/O can block indefinitely. `UploadBlock` cleanup uses a separate
+(and dial), not ongoing PDU reads/writes; `WithRequestTimeout` (default 0: none)
+bounds each request after Connect. Without cancel, a deadline or a request
+timeout, open-session I/O can block until the transport fails or `Close` ends
+the call: `Close` ends the call in flight with `ErrClosed`. `UploadBlock` cleanup uses a separate
 500ms background context. Details: [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
 
 A second `Connect()` on an already-connected client only replaces the session

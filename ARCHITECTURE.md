@@ -36,8 +36,10 @@ The root package holds documentation only. Applications import the subpackages.
 
 A `Client` owns one `*cotp.Conn`. Its options do not change after `New`.
 
-- `reqMu` serialises protocol operations, so one request/response exchange runs at a time on a client. `Connect` and `Close` take it too: `Close` waits for the operation in flight and does not interrupt it. A `Logger` and a `Dialer` are called with it held. As a result `RangeProbeRequest.Parallelism` gives no wire-level concurrency.
-- `mu` guards the session fields (`conn`, rack, slot, TSAPs, PDU size) for readers such as `ConnectionInfo` and `PDUSize`.
+- `reqLock` serialises the calls, operations and `Connect`, so one request/response exchange runs at a time on a client. It is a lock whose wait ends with the caller's context: a call that waits for its turn returns its context's error and sends nothing. A `Logger` and a `Dialer` are called with it held. As a result `RangeProbeRequest.Parallelism` gives no wire-level concurrency.
+- `mu` guards the session fields (`conn`, rack, slot, TSAPs, PDU size) for readers such as `ConnectionInfo` and `PDUSize`, and the Close state: a count of the calls of `Close` and the cancel function of the `Connect` in flight. A call takes `reqLock` first and `mu` inside it, never the other way round.
+- `Close` takes `mu` only, so it never waits for a call, and may be called from a `Logger` or a `Dialer`. It counts itself, cancels the context of a `Connect` in flight, and closes the connection, which ends a read or write in flight (go-cotp's `Close` is safe concurrently with them). A call records the count when it starts; one that finds it changed returns `ErrClosed` before it sends, after a failed exchange, and before `Connect` installs its session, so a `Connect` that Close ended leaves no session.
+- `WithRequestTimeout` derives a context for each exchange in `sendReceive` from the call's context, so the earlier deadline wins; go-cotp applies it to the read and the write of that exchange.
 - A repeated `Connect` replaces the session only after the new handshake succeeds.
 - An exchange that is given up after its request was sent (its context ended, or the transport failed) closes the connection and clears the session fields under `mu`. Answers are matched to requests by their order on the connection and checked by PDU reference, so a connection with an answer still to come is not used again.
 

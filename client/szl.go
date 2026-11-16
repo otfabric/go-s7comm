@@ -226,8 +226,10 @@ func applyComponentID(info *model.DeviceInfo, data []byte) error {
 // when one SZL succeeds and the other fails; (nil, error) only when both
 // fail. Fields a CPU does not report stay empty.
 func (c *Client) Identify(ctx context.Context) (*model.DeviceInfo, error) {
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return nil, err
+	}
+	defer c.endCall()
 
 	info := &model.DeviceInfo{}
 	var errs []error
@@ -254,8 +256,10 @@ func (c *Client) Identify(ctx context.Context) (*model.DeviceInfo, error) {
 // low nibble of the first record's bzu-id byte, 1-4 STOP, 5-7 STARTUP,
 // 8-9 RUN, 10 HOLD.
 func (c *Client) GetCPUState(ctx context.Context) (model.CPUState, error) {
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return model.CPUStateUnknown, err
+	}
+	defer c.endCall()
 
 	resp, err := c.readSZL(ctx, wire.SZLCPUState, 0)
 	if err != nil {
@@ -288,8 +292,10 @@ const szlProtectionIndex = 0x0004
 // 0x0232 index 4): Siemens level 1 (no protection), 2 (write protection)
 // or 3 (read and write protection).
 func (c *Client) GetProtectionLevel(ctx context.Context) (model.ProtectionLevel, error) {
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return model.ProtectionNone, err
+	}
+	defer c.endCall()
 
 	resp, err := c.readSZL(ctx, wire.SZLProtectionInfo, szlProtectionIndex)
 	if err != nil {
@@ -316,8 +322,10 @@ func (c *Client) GetProtectionLevel(ctx context.Context) (model.ProtectionLevel,
 // ReadDiagBufferRaw returns the SZL 0x00A0 (diagnostic buffer) list data:
 // record length, record count and the records, all packets of it.
 func (c *Client) ReadDiagBufferRaw(ctx context.Context) ([]byte, error) {
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return nil, err
+	}
+	defer c.endCall()
 
 	resp, err := c.readSZL(ctx, wire.SZLDiagBuffer, 0)
 	if err != nil {

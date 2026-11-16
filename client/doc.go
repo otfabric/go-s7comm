@@ -58,7 +58,7 @@
 //
 // # Errors and sentinels
 //
-// Stable and documented: ErrNotConnected, ErrRequestExceedsPDU, PDURefMismatchError,
+// Stable and documented: ErrNotConnected, ErrClosed, ErrRequestExceedsPDU, PDURefMismatchError,
 // ValidationError, ReadStatus values. Use errors.As(err, &ValidationError{}) for
 // caller-input validation; errors.As(err, *PDURefMismatchError) for response correlation.
 // ErrProtocolFailure is advanced/diagnostic (malformed protocol framing); handshake and
@@ -106,13 +106,22 @@
 //
 // Concurrent use is safe, but all protocol operations are serialized per client instance.
 // Only one request or connection transition is in flight at a time; long operations
-// (e.g. UploadBlock) block other reads and writes on that client. Typical use:
+// (e.g. UploadBlock) block other reads and writes on that client. A call that
+// waits for its turn returns its context's error when that context ends. Typical use:
 // Connect once, perform operations, then Close. Calling methods after Close
 // returns ErrNotConnected. Close is safe to call more than once and from
-// multiple goroutines; it waits for the operation in flight and does not
-// interrupt it. A Logger and a Dialer run while an operation is in flight:
-// they may call ConnectionInfo and PDUSize, and must not call an operation,
-// Connect or Close of the same client.
+// multiple goroutines; it ends the call in flight, and a call waiting for its
+// turn, with ErrClosed, and does not wait for them. A Logger and a Dialer run
+// while a call is in flight: they may call ConnectionInfo, PDUSize and Close,
+// and must not call an operation or Connect of the same client.
+//
+// # Time bounds
+//
+// WithTimeout bounds Connect. WithRequestTimeout (default 0: none) bounds
+// each request after Connect, and the context of a call bounds the call; the
+// earlier deadline wins. Without either, a call to a peer that stops
+// answering without closing the connection waits until the connection fails
+// or Close ends the call.
 //
 // # Reconnection
 //

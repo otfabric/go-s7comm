@@ -19,6 +19,11 @@ import (
 // ErrNotConnected is returned when an operation requires an active connection but the client is not connected.
 var ErrNotConnected = errors.New("not connected")
 
+// ErrClosed is returned by a call that was in flight when Close was called:
+// running, or waiting for its turn. Close ended it. A call made after Close
+// returns ErrNotConnected until Connect succeeds again.
+var ErrClosed = errors.New("client closed")
+
 // ErrProtocolFailure marks errors from COTP/S7 decode, parse, or header validation (for ReadStatus classification).
 var ErrProtocolFailure = errors.New("protocol failure")
 
@@ -36,6 +41,13 @@ func (e *PDURefMismatchError) Error() string {
 	return fmt.Sprintf("S7 response PDU ref mismatch: expected %d, got %d", e.Expected, e.Got)
 }
 
+// Locking. reqLock serialises the calls (the operations and Connect): a call
+// holds it from beginCall to endCall, and callGen belongs to the holder. mu
+// guards the session fields (conn, rack, slot, TSAPs, PDU size, AmQ),
+// closeGen (how often Close was called) and cancelConnect (the Connect in
+// flight, nil when none). A call takes reqLock first and mu inside it; Close
+// takes mu only, so it never waits for a call.
+
 // Client is an S7 protocol client. rack and slot hold the negotiated/detected values
 // for the current connection; options are immutable after construction.
 type Client struct {
@@ -44,7 +56,8 @@ type Client struct {
 	conn          *cotp.Conn
 	rack          int
 	slot          int
-	reqMu         sync.Mutex
+	reqLock       requestLock
+	callGen       uint64
 	mu            sync.RWMutex
 	pduRef        uint32
 	localTSAP     uint16
@@ -52,7 +65,55 @@ type Client struct {
 	pduSize       int
 	maxAmqCalling int
 	maxAmqCalled  int
+	closeGen      uint64
+	cancelConnect context.CancelFunc
 }
+
+// requestLock is a mutex whose lock gives up when a context ends, so a call
+// that waits for its turn honours its context. Its zero value is unlocked.
+type requestLock struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func (l *requestLock) lock(ctx context.Context) error {
+	l.once.Do(func() { l.ch = make(chan struct{}, 1) })
+	select {
+	case l.ch <- struct{}{}:
+		return nil
+	default:
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case l.ch <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (l *requestLock) unlock() { <-l.ch }
+
+// beginCall waits for the client's turn until ctx ends, and records which
+// Close the call started after (callGen). endCall gives the turn back.
+func (c *Client) beginCall(ctx context.Context) error {
+	c.mu.RLock()
+	gen := c.closeGen
+	c.mu.RUnlock()
+	if err := c.reqLock.lock(ctx); err != nil {
+		return err
+	}
+	c.callGen = gen
+	return nil
+}
+
+func (c *Client) endCall() { c.reqLock.unlock() }
+
+// closedLocked reports whether Close was called since the call holding
+// reqLock started. The caller holds mu.
+func (c *Client) closedLocked() bool { return c.closeGen != c.callGen }
 
 // New creates a new S7 client for the given host
 func New(host string, opts ...Option) *Client {
@@ -79,6 +140,10 @@ func New(host string, opts ...Option) *Client {
 // The negotiated PDU size (PDUSize) is at most the size proposed with
 // WithMaxPDU, and an answer longer than it is refused with an error that
 // matches ErrProtocolFailure.
+//
+// Connect waits for the call in flight on the client, if any, until ctx
+// ends. Close ends a Connect in flight: Connect then returns an error that
+// matches ErrClosed and leaves no session.
 func (c *Client) Connect(ctx context.Context) error {
 	port := c.opts.port
 	timeout := c.opts.timeout
@@ -95,6 +160,9 @@ func (c *Client) Connect(ctx context.Context) error {
 	if timeout < 0 {
 		return &ValidationError{Message: fmt.Sprintf("invalid timeout: %v", timeout)}
 	}
+	if c.opts.requestTimeout < 0 {
+		return &ValidationError{Message: fmt.Sprintf("invalid request timeout: %v", c.opts.requestTimeout)}
+	}
 	if maxPDU < 1 || maxPDU > math.MaxUint16 {
 		return &ValidationError{Message: fmt.Sprintf("invalid max PDU: %d", maxPDU)}
 	}
@@ -107,19 +175,52 @@ func (c *Client) Connect(ctx context.Context) error {
 		}
 	}
 
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
-
-	if autoRackSlot && !useExplicit {
-		err := c.autoConnect(ctx)
-		if err != nil && logger != nil {
-			logger.Error("Connect failed: %v", err)
-		}
-		return err
-	}
-	err := c.connectOnce(ctx, rack, slot)
+	err := c.connect(ctx, rack, slot, autoRackSlot && !useExplicit)
 	if err != nil && logger != nil {
 		logger.Error("Connect failed: %v", err)
+	}
+	return err
+}
+
+// connect runs Connect's attempts in the client's turn, with a context that
+// Close cancels (cancelConnect). An attempt that Close ended returns an
+// error that matches ErrClosed.
+func (c *Client) connect(ctx context.Context, rack, slot int, auto bool) error {
+	if err := c.beginCall(ctx); err != nil {
+		return err
+	}
+	defer c.endCall()
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	c.mu.Lock()
+	closed := c.closedLocked()
+	if !closed {
+		c.cancelConnect = cancel
+	}
+	c.mu.Unlock()
+	if closed {
+		return ErrClosed
+	}
+	defer func() {
+		c.mu.Lock()
+		c.cancelConnect = nil
+		c.mu.Unlock()
+	}()
+
+	var err error
+	if auto {
+		err = c.autoConnect(ctx)
+	} else {
+		err = c.connectOnce(ctx, rack, slot)
+	}
+	if err != nil && !errors.Is(err, ErrClosed) {
+		c.mu.RLock()
+		closed = c.closedLocked()
+		c.mu.RUnlock()
+		if closed {
+			err = fmt.Errorf("%w: %w", ErrClosed, err)
+		}
 	}
 	return err
 }
@@ -190,6 +291,13 @@ func (c *Client) connectOnce(ctx context.Context, rack, slot int) error {
 		return fmt.Errorf("S7 setup: %w", err)
 	}
 	c.mu.Lock()
+	if c.closedLocked() {
+		// Close was called during the handshake: the new session is not
+		// installed, so the client stays as Close left it.
+		c.mu.Unlock()
+		_ = closeCOTP(conn)
+		return ErrClosed
+	}
 	oldConn := c.conn
 	c.conn = conn
 	c.rack, c.slot = rack, slot
@@ -266,13 +374,18 @@ func requestNotSent(err error) bool {
 // endSession closes conn and clears the session, so that later calls return
 // ErrNotConnected. It is called when an exchange is given up after its
 // request was sent: the answer may still arrive, and the next request on the
-// same connection would read it as its own.
-func (c *Client) endSession(conn *cotp.Conn) {
+// same connection would read it as its own. It returns err, wrapped so that
+// it matches ErrClosed when Close ended the session during the call.
+func (c *Client) endSession(conn *cotp.Conn, err error) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.conn == conn { // always, while the caller holds reqMu
+	if c.conn == conn { // unless Close cleared it: only Close does, while a call holds reqLock
 		_ = c.closeConnLocked()
 	}
+	if c.closedLocked() {
+		return fmt.Errorf("%w: %w", ErrClosed, err)
+	}
+	return err
 }
 
 // sendReceive sends req and returns response param/data. When expectedPDURef is non-zero,
@@ -283,32 +396,42 @@ func (c *Client) endSession(conn *cotp.Conn) {
 // read its answer (the context ends, or the transport fails) ends the session
 // (endSession). An answer that arrived and is refused (its length, reference,
 // type or content) leaves the session open: the stream is still aligned.
+//
+// The exchange is bounded by WithRequestTimeout, when set, and by ctx; the
+// earlier deadline wins. A call that Close ended returns ErrClosed.
 func (c *Client) sendReceive(ctx context.Context, req []byte, expectedPDURef uint16) ([]byte, []byte, error) {
 	c.mu.RLock()
 	conn := c.conn
 	pduSize := c.pduSize
+	closed := c.closedLocked()
 	c.mu.RUnlock()
+	if closed {
+		return nil, nil, ErrClosed
+	}
 	if conn == nil {
 		return nil, nil, ErrNotConnected
 	}
 	if pduSize > 0 && len(req) > pduSize {
 		return nil, nil, fmt.Errorf("request size %d exceeds negotiated PDU size %d: %w", len(req), pduSize, ErrRequestExceedsPDU)
 	}
+	if d := c.opts.requestTimeout; d > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, d)
+		defer cancel()
+	}
 	if err := conn.WriteTSDU(ctx, req); err != nil {
 		if !requestNotSent(err) {
-			c.endSession(conn)
+			err = c.endSession(conn, err)
 		}
 		return nil, nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		c.endSession(conn)
-		return nil, nil, err
+		return nil, nil, c.endSession(conn, err)
 	}
 
 	s7Data, err := conn.ReadTSDU(ctx)
 	if err != nil {
-		c.endSession(conn)
-		return nil, nil, err
+		return nil, nil, c.endSession(conn, err)
 	}
 	if limit := answerLimit(pduSize, c.opts.maxPDU); len(s7Data) > limit {
 		return nil, nil, fmt.Errorf("answer of %d bytes exceeds the negotiated PDU size %d: %w", len(s7Data), limit, ErrProtocolFailure)
@@ -357,19 +480,23 @@ func splitS7Payload(header *wire.S7Header, rest []byte) (param, data []byte, ok 
 }
 
 // Close ends the session and closes the connection. On a client that is not
-// connected it does nothing and returns nil. Close is safe to call more than
-// once and from multiple goroutines.
+// connected it closes nothing and returns nil. Close is safe to call more
+// than once and from multiple goroutines.
 //
-// Close waits for the operation in flight on this client (a read, a write,
-// an upload, Connect) and does not interrupt it: to end a blocked call,
-// cancel its context. It must not be called from a Logger or a Dialer of
-// this client, which run while the operation is in flight.
+// Close ends the call in flight on this client and does not wait for it: a
+// read, a write, an upload or Connect, also one that waits for its turn,
+// returns an error that matches ErrClosed (a read: status transport-error).
+// A call waiting for the peer returns at once; one in a pause of
+// WithRateLimit returns when the pause is over. Close may be called from a
+// Logger or a Dialer of this client. Calls made after Close return
+// ErrNotConnected until Connect succeeds again.
 func (c *Client) Close() error {
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.closeGen++
+	if c.cancelConnect != nil {
+		c.cancelConnect()
+	}
 	return c.closeConnLocked()
 }
 

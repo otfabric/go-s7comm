@@ -16,8 +16,10 @@ func (c *Client) ReadBit(ctx context.Context, addr model.BitAddress) (bool, erro
 	if err := validateBitAddress(addr); err != nil {
 		return false, err
 	}
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return false, err
+	}
+	defer c.endCall()
 
 	c.mu.RLock()
 	conn := c.conn
@@ -67,8 +69,10 @@ func (c *Client) WriteBit(ctx context.Context, addr model.BitAddress, value bool
 	if err := validateBitAddress(addr); err != nil {
 		return err
 	}
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return err
+	}
+	defer c.endCall()
 
 	c.mu.RLock()
 	conn := c.conn

@@ -25,7 +25,7 @@ func classifyOpError(err error) ReadStatus {
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return ReadStatusTimeout
 	}
-	if errors.Is(err, ErrNotConnected) {
+	if errors.Is(err, ErrNotConnected) || errors.Is(err, ErrClosed) {
 		return ReadStatusTransportErr
 	}
 	if _, ok := errors.AsType[*wire.S7Error](err); ok {
@@ -72,8 +72,10 @@ func (c *Client) ReadArea(ctx context.Context, addr model.Address) (*ReadResult,
 	if err := validateRangeEnd(addr.Start, addr.Size); err != nil {
 		return nil, err
 	}
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return newFailedReadResult(max(addr.Size, 0), err), nil
+	}
+	defer c.endCall()
 
 	reqLen := max(addr.Size, 0)
 	out := &ReadResult{
@@ -208,8 +210,10 @@ func (c *Client) WriteArea(ctx context.Context, addr model.Address, data []byte)
 	if err := validateRangeEnd(addr.Start, len(data)); err != nil {
 		return err
 	}
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	if err := c.beginCall(ctx); err != nil {
+		return err
+	}
+	defer c.endCall()
 	if err := ctx.Err(); err != nil {
 		return err
 	}

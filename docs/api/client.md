@@ -49,7 +49,7 @@ Identify, GetBlockInfo, ListAllBlocks, and ReadDiagBuffer may return partial dat
 
 #### Errors and sentinels {#hdr-Errors_and_sentinels}
 
-Stable and documented: ErrNotConnected, ErrRequestExceedsPDU, PDURefMismatchError, ValidationError, ReadStatus values. Use errors.As(err, &ValidationError{}) for caller-input validation; errors.As(err, \*PDURefMismatchError) for response correlation. ErrProtocolFailure is advanced/diagnostic (malformed protocol framing); handshake and request path wrap it for classification. Returned errors may wrap multiple underlying errors; use errors.Is and errors.As; do not rely on exact joined structure.
+Stable and documented: ErrNotConnected, ErrClosed, ErrRequestExceedsPDU, PDURefMismatchError, ValidationError, ReadStatus values. Use errors.As(err, &ValidationError{}) for caller-input validation; errors.As(err, \*PDURefMismatchError) for response correlation. ErrProtocolFailure is advanced/diagnostic (malformed protocol framing); handshake and request path wrap it for classification. Returned errors may wrap multiple underlying errors; use errors.Is and errors.As; do not rely on exact joined structure.
 
 #### Validation vs read outcome {#hdr-Validation_vs_read_outcome}
 
@@ -71,7 +71,11 @@ No request is repeated by the client: ReadArea, WriteArea, CompareRead and Uploa
 
 #### Concurrency {#hdr-Concurrency}
 
-Concurrent use is safe, but all protocol operations are serialized per client instance. Only one request or connection transition is in flight at a time; long operations (e.g. UploadBlock) block other reads and writes on that client. Typical use: Connect once, perform operations, then Close. Calling methods after Close returns ErrNotConnected. Close is safe to call more than once and from multiple goroutines; it waits for the operation in flight and does not interrupt it. A Logger and a Dialer run while an operation is in flight: they may call ConnectionInfo and PDUSize, and must not call an operation, Connect or Close of the same client.
+Concurrent use is safe, but all protocol operations are serialized per client instance. Only one request or connection transition is in flight at a time; long operations (e.g. UploadBlock) block other reads and writes on that client. A call that waits for its turn returns its context's error when that context ends. Typical use: Connect once, perform operations, then Close. Calling methods after Close returns ErrNotConnected. Close is safe to call more than once and from multiple goroutines; it ends the call in flight, and a call waiting for its turn, with ErrClosed, and does not wait for them. A Logger and a Dialer run while a call is in flight: they may call ConnectionInfo, PDUSize and Close, and must not call an operation or Connect of the same client.
+
+#### Time bounds {#hdr-Time_bounds}
+
+WithTimeout bounds Connect. WithRequestTimeout (default 0: none) bounds each request after Connect, and the context of a call bounds the call; the earlier deadline wins. Without either, a call to a peer that stops answering without closing the connection waits until the connection fails or Close ends the call.
 
 #### Reconnection {#hdr-Reconnection}
 
@@ -84,6 +88,12 @@ ConnectionInfo() is the canonical source for negotiated connection state; Connec
 Package client provides a high-level S7 client API.
 
 ## Variables
+
+```go
+var ErrClosed = errors.New("client closed")
+```
+
+ErrClosed is returned by a call that was in flight when Close was called: running, or waiting for its turn. Close ended it. A call made after Close returns ErrNotConnected until Connect succeeds again.
 
 ```go
 var ErrNilReadResult = errors.New("read result is nil")
@@ -153,9 +163,9 @@ BlockCounts returns how many blocks of each type the CPU holds (block functions,
 func (c *Client) Close() error
 ```
 
-Close ends the session and closes the connection. On a client that is not connected it does nothing and returns nil. Close is safe to call more than once and from multiple goroutines.
+Close ends the session and closes the connection. On a client that is not connected it closes nothing and returns nil. Close is safe to call more than once and from multiple goroutines.
 
-Close waits for the operation in flight on this client (a read, a write, an upload, Connect) and does not interrupt it: to end a blocked call, cancel its context. It must not be called from a Logger or a Dialer of this client, which run while the operation is in flight.
+Close ends the call in flight on this client and does not wait for it: a read, a write, an upload or Connect, also one that waits for its turn, returns an error that matches ErrClosed (a read: status transport-error). A call waiting for the peer returns at once; one in a pause of WithRateLimit returns when the pause is over. Close may be called from a Logger or a Dialer of this client. Calls made after Close return ErrNotConnected until Connect succeeds again.
 
 #### func (Client) Connect
 
@@ -168,6 +178,8 @@ Connect dials the host, completes the COTP handshake and S7 Setup Communication,
 A session ends with Close, and when a later call is given up after its request was sent: its context ended, or the transport failed. The answer to that request may still arrive, and the next request on the same connection would read it, so the client closes the connection. Calls then return ErrNotConnected until Connect succeeds again. A context that has already ended when a call starts sends nothing and leaves the session open, and so does an answer that arrives and is refused.
 
 The negotiated PDU size (PDUSize) is at most the size proposed with WithMaxPDU, and an answer longer than it is refused with an error that matches ErrProtocolFailure.
+
+Connect waits for the call in flight on the client, if any, until ctx ends. Close ends a Connect in flight: Connect then returns an error that matches ErrClosed and leaves no session.
 
 #### func (Client) ConnectionInfo
 
@@ -451,7 +463,7 @@ type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
 Dialer opens the transport connection to addr ("host:port"). It receives network "tcp". Like net.Dialer, it returns a non-nil connection exactly when the error is nil.
 
-The Dialer of WithDialer runs inside Connect, while the client holds the lock that serialises its operations: it may call ConnectionInfo and PDUSize of that client, and must not call one of its operations, Connect or Close, which would wait for that lock and not return.
+The Dialer of WithDialer runs on the goroutine of Connect, while Connect holds the client's turn. It may call ConnectionInfo, PDUSize and Close of that client; Close ends the Connect that runs the Dialer, which then returns an error that matches ErrClosed. It must not call an operation or Connect of that client: such a call waits for the Connect that runs the Dialer, so it returns only when its own context ends, with that context's error. A Dialer that does not return normally is not recovered by the client: the unwinding reaches the caller of Connect, the session in place (if any) is kept, and the client's turn is given back.
 
 ### type DiscoverOption
 
@@ -564,7 +576,7 @@ type Logger interface {
 
 Logger is an optional printf-style sink for client diagnostics. Nil (the default when WithLogger is omitted) disables logging. Methods are invoked synchronously on the request path and must not block. Args follow fmt.Sprintf conventions (e.g. Error("Connect failed: %v", err)). Use NewSlogLogger to adapt a slog.Handler without changing this interface.
 
-The methods run while the client holds the lock that serialises its operations. They may call ConnectionInfo and PDUSize of that client; they must not call one of its operations, Connect or Close, which would wait for that lock and not return.
+The methods run on the goroutine of the call that logs (Connect, the cleanup of UploadBlock), while that call holds the client's turn. They may call ConnectionInfo, PDUSize and Close of that client; Close ends the call that logs, as it ends any call in flight. They must not call an operation or Connect of that client: such a call waits for the call that logs, so it returns only when its own context ends, with that context's error. A method that does not return normally is not recovered by the client: the unwinding reaches the caller of the call that logs, and the client's turn is given back, so the client stays usable.
 
 #### func NewSlogLogger
 
@@ -638,6 +650,16 @@ func WithRateLimit(d time.Duration) Option
 
 WithRateLimit sets a minimal delay between sequential protocol operations.
 
+#### func WithRequestTimeout
+
+```go
+func WithRequestTimeout(d time.Duration) Option
+```
+
+WithRequestTimeout bounds each request after Connect: sending one request PDU and waiting for its answer. A call of several requests (a read or a write larger than the PDU, an SZL list or block list of several packets, an upload) applies it to each of them. The call's context still bounds the whole call, and the earlier deadline wins. The pauses of WithRateLimit and the wait for the client's turn are not requests.
+
+A request that runs out of time returns an error that matches context.DeadlineExceeded (a read: status timeout) and, once the request was sent, ends the session as a context deadline does (see Connect). 0, the default, sets no bound: a call is bounded by its context alone. Connect refuses a negative value with ValidationError.
+
 #### func WithTSAP
 
 ```go
@@ -652,7 +674,7 @@ WithTSAP sets explicit TSAP values
 func WithTimeout(t time.Duration) Option
 ```
 
-WithTimeout sets the connection/operation timeout
+WithTimeout bounds Connect: the dial, the COTP handshake and S7 Setup Communication (default 5s; 0 = no bound beyond the context). It does not bound the requests after Connect: see WithRequestTimeout.
 
 ### type PDURefMismatchError
 
