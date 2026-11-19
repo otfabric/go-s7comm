@@ -53,7 +53,7 @@ A `Client` starts no goroutine of its own. Goroutines exist only in the multi-ta
 
 Context behaviour, including why cancelling during I/O aborts the session, is in [ERRORS.md](ERRORS.md#context-reconnect-and-concurrency).
 
-A `server.Server` runs one goroutine per accepted connection, bounded by `MaxConnections`, plus the caller's `Serve`. One `sync.RWMutex` guards every area: a Read Var job holds it for reading, a Write Var job for writing, so a multi-item job is one step. `Close` closes listeners and connections and waits for every connection goroutine: a connection is counted in the server's `sync.WaitGroup` under the lock that registers it, so `Close` also waits for one whose goroutine has not started yet.
+A `server.Server` runs one goroutine per accepted connection, bounded by `MaxConnections`, plus the caller's `Serve`. One `sync.RWMutex` guards every area: a Read Var job holds it for reading, a Write Var job for writing, so a multi-item job is one step. With `Config.OnWrite` set, a Write Var job resolves each item under the read lock, asks `OnWrite` with no lock held, and applies an accepted item under the write lock before asking about the next: such a job is not one step. `Config.CheckRead` is asked under the read lock. `Close` ends the context `OnWrite` runs with before it waits. `Close` closes listeners and connections and waits for every connection goroutine: a connection is counted in the server's `sync.WaitGroup` under the lock that registers it, so `Close` also waits for one whose goroutine has not started yet.
 
 ## Platform backends
 

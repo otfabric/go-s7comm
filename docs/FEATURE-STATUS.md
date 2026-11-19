@@ -58,6 +58,7 @@ The module is pure Go; go-cotp and go-tpkt are its only dependencies, apart from
 | Discovery | `Discover` | ◐ IPv4 only, up to `/12` | validation, CIDR handling and cancellation only | no |
 | Block download, PLC start and stop | — | — | n/a | n/a |
 | Test server: setup, Read Var, Write Var on DB, I, Q, M, T, C; DBREAD | `server.New`, `RegisterDB`, `RegisterArea`, `Serve` | ◐ for tests; no SZL, blocks; timers and counters do not run | this module's client (`server/`); every recorded job of real CPUs, byte for byte | snap7-interop's probe, all 15 fixtures in its Own stack workflow, the read-only code `0x03` (as a recorded S7-1200 sends it) an intentional difference from the Snap7 references' `0x0A` ([LIMITATIONS.md](../LIMITATIONS.md#verification)) |
+| Server read check and write hook (an item refused with the host's code; a write applied only when the host accepts it) | `server.Config.CheckRead`, `server.Config.OnWrite`, `server.Item` | ✅ | this module's client (`server/hooks_test.go`: bytes, bits, multi-item jobs, DBREAD ranges, refusals, `Close` ending a hook); lifecycle rows L9 to L11; concurrent clients and host access; chaos with hooks | no |
 | TLS, password handling | — | — | n/a | n/a |
 
 Wire decoders in `wire/` have fuzz targets; see [TESTING.md](../TESTING.md#fuzzing).

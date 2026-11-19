@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"encoding/binary"
 	"math/rand/v2"
 	"testing"
@@ -17,6 +18,49 @@ import (
 // never past the PDU, and memory keeps its size and holds no write to
 // timers or counters.
 func TestChaosRealCPUJobs(t *testing.T) {
+	chaosRealCPUJobs(t, realCPUSession(t, 240))
+}
+
+// TestChaosRealCPUJobsWithHooks runs the same mutations with CheckRead and
+// OnWrite set, so that a Write Var job takes the path that asks OnWrite item
+// by item: the hooks refuse every third item they are asked about, OnWrite is
+// never asked about a timer, a counter or an item past an area, and the
+// answers keep the same guarantees.
+func TestChaosRealCPUJobsWithHooks(t *testing.T) {
+	s := realCPUSession(t, 240)
+	asked, writes := 0, 0
+	s.srv.cfg.CheckRead = func(Item) byte {
+		if asked++; asked%3 == 0 {
+			return wire.RetCodeAccessFault
+		}
+		return wire.RetCodeSuccess
+	}
+	s.srv.cfg.OnWrite = func(_ context.Context, it Item, data []byte) byte {
+		if it.Area.timerOrCounter() || len(data) != it.Size {
+			t.Errorf("OnWrite asked about %+v with %d bytes", it, len(data))
+		}
+		if _, err := s.srv.Read(it.Area, it.DB, it.Start, it.Size); err != nil {
+			t.Errorf("OnWrite asked about an item past its area: %+v: %v", it, err)
+		}
+		writes++
+		if asked++; asked%3 == 0 {
+			return wire.RetCodeHWFault
+		}
+		return wire.RetCodeSuccess
+	}
+	chaosRealCPUJobs(t, s, writeJob(
+		any12(wire.TransportSizeByte, 2, 76, wire.AreaDB, 100*8), dataItem(wire.DataTransportSizeByte, 16, 7, 8),
+		any12(wire.TransportSizeByte, 1, 74, wire.AreaDB, 3*8), dataItem(wire.DataTransportSizeByte, 8, 9),
+	))
+	if writes == 0 {
+		t.Error("OnWrite was never asked")
+	}
+}
+
+// chaosRealCPUJobs mutates the jobs real clients send, and extra jobs, and
+// checks every answer of s.
+func chaosRealCPUJobs(t *testing.T, s *session, extra ...[]byte) {
+	t.Helper()
 	seeds := [][]byte{
 		readJob(dbreadItem([3]int{2, 74, 108}, [3]int{4, 76, 404})),
 		readJob(any12(transportTimer, 2, 0, wire.AreaTimer, 1), any12(transportCounter, 1, 0, wire.AreaCounter, 0)),
@@ -24,8 +68,8 @@ func TestChaosRealCPUJobs(t *testing.T) {
 		writeJob(any12(transportTimer, 1, 0, wire.AreaTimer, 0), dataItem(wire.DataTransportSizeOctet, 2, 1, 2)),
 		must(wire.EncodeSetupCommRequest(1, 1, 3, 480)),
 	}
+	seeds = append(seeds, extra...)
 	rng := rand.New(rand.NewPCG(20261107, 1))
-	s := realCPUSession(t, 240)
 	timers, _ := s.srv.Read(AreaTimers, 0, 0, 8)
 	for i := range 20000 {
 		req := append([]byte(nil), seeds[rng.IntN(len(seeds))]...)

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"log/slog"
 	"math"
+	"net"
 
 	"github.com/otfabric/go-s7comm/wire"
 )
@@ -29,6 +30,7 @@ type session struct {
 	srv     *Server
 	pduSize int
 	log     *slog.Logger
+	client  net.Addr
 }
 
 // handle answers one S7 PDU. keep is false when the header itself cannot
@@ -145,6 +147,7 @@ type target struct {
 	isBit  bool
 	transp byte
 	area   Area
+	db     int
 }
 
 // resolve checks one item against memory and returns the item return code
@@ -177,7 +180,7 @@ func (s *session) resolve(spec wire.VarSpec) (target, byte) {
 	if area.timerOrCounter() != tc || (tc && spec.TransportSize != byte(area)) {
 		return target{}, wire.RetCodeAddressFault
 	}
-	t := target{reg: reg, size: per * int(spec.Count), transp: spec.TransportSize, area: area}
+	t := target{reg: reg, size: per * int(spec.Count), transp: spec.TransportSize, area: area, db: int(key.db)}
 	t.isBit = spec.TransportSize == wire.TransportSizeBit
 	if t.size == 0 || (t.isBit && t.size > 1) {
 		return target{}, wire.RetCodeAddressFault
@@ -262,6 +265,9 @@ func (s *session) read(ref uint16, param []byte) ([]byte, error) {
 			continue
 		}
 		t, code := s.resolve(spec)
+		if code == wire.RetCodeSuccess {
+			code = s.checkRead(s.item(t))
+		}
 		if code != wire.RetCodeSuccess {
 			results[i] = wire.ReadVarResult{ReturnCode: code}
 			used += 4
@@ -303,6 +309,9 @@ func (s *session) dbRead(ranges []wire.DBReadArea) wire.ReadVarResult {
 		if n == 0 || start+n > len(reg.data) {
 			return wire.ReadVarResult{ReturnCode: wire.RetCodeAddressFault}
 		}
+		if code := s.checkRead(Item{Client: s.client, Area: AreaDB, DB: int(r.DBNumber), Start: start, Size: n, Bit: -1}); code != wire.RetCodeSuccess {
+			return wire.ReadVarResult{ReturnCode: code}
+		}
 		data = append(append(data, wire.RetCodeSuccess), reg.data[start:start+n]...)
 	}
 	return wire.ReadVarResult{ReturnCode: wire.RetCodeSuccess, TransportSize: wire.DataTransportSizeOctet, RawLength: lengthField(len(data)), Data: data}
@@ -318,35 +327,81 @@ func (s *session) write(ref uint16, param, data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.srv.mem.mu.Lock()
-	defer s.srv.mem.mu.Unlock()
 	codes := make([]byte, len(specs))
+	if s.srv.cfg.OnWrite == nil {
+		s.srv.mem.mu.Lock()
+		defer s.srv.mem.mu.Unlock()
+		for i, spec := range specs {
+			t, code := s.writable(spec, items[i])
+			if code == wire.RetCodeSuccess {
+				apply(t, items[i].Data)
+			}
+			codes[i] = code
+		}
+		return wire.EncodeWriteVarResponse(ref, codes)
+	}
 	for i, spec := range specs {
-		codes[i] = s.writeItem(spec, items[i])
+		s.srv.mem.mu.RLock()
+		t, code := s.writable(spec, items[i])
+		s.srv.mem.mu.RUnlock()
+		data := append([]byte(nil), items[i].Data...)
+		if code == wire.RetCodeSuccess {
+			code = s.srv.cfg.OnWrite(s.srv.hooks, s.item(t), data)
+		}
+		if code == wire.RetCodeSuccess {
+			s.srv.mem.mu.Lock()
+			apply(t, data)
+			s.srv.mem.mu.Unlock()
+		}
+		codes[i] = code
 	}
 	return wire.EncodeWriteVarResponse(ref, codes)
 }
 
-func (s *session) writeItem(spec wire.VarSpec, item wire.WriteVarData) byte {
+// writable resolves a write item: the code that refuses it, or
+// RetCodeSuccess and its target. The caller holds the memory lock.
+func (s *session) writable(spec wire.VarSpec, item wire.WriteVarData) (target, byte) {
 	t, code := s.resolve(spec)
 	if code != wire.RetCodeSuccess {
-		return code
+		return t, code
 	}
 	if len(item.Data) != t.size {
-		return wire.RetCodeDataSizeFault
+		return t, wire.RetCodeDataSizeFault
 	}
 	if t.reg.readOnly || t.area.timerOrCounter() {
-		return wire.RetCodeAccessFault
+		return t, wire.RetCodeAccessFault
 	}
+	return t, wire.RetCodeSuccess
+}
+
+// apply writes an item's data to its target. The caller holds the memory
+// lock for writing.
+func apply(t target, data []byte) {
 	if t.isBit {
 		mask := byte(1) << t.bit
-		if item.Data[0]&0x01 != 0 {
+		if data[0]&0x01 != 0 {
 			t.reg.data[t.start] |= mask
 		} else {
 			t.reg.data[t.start] &^= mask
 		}
+		return
+	}
+	copy(t.reg.data[t.start:], data)
+}
+
+// item is a resolved target as the hooks see it.
+func (s *session) item(t target) Item {
+	it := Item{Client: s.client, Area: t.area, DB: t.db, Start: t.start, Size: t.size, Bit: -1}
+	if t.isBit {
+		it.Bit = t.bit
+	}
+	return it
+}
+
+// checkRead asks Config.CheckRead about an item, when it is set.
+func (s *session) checkRead(it Item) byte {
+	if s.srv.cfg.CheckRead == nil {
 		return wire.RetCodeSuccess
 	}
-	copy(t.reg.data[t.start:], item.Data)
-	return wire.RetCodeSuccess
+	return s.srv.cfg.CheckRead(it)
 }

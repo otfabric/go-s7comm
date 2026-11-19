@@ -43,6 +43,50 @@ type Config struct {
 	IdleTimeout time.Duration
 	// Logger receives connection and request diagnostics. Nil discards them.
 	Logger *slog.Logger
+	// CheckRead, when set, is asked for each read item that addresses a
+	// registered area within its bounds (each range of a DBREAD item),
+	// before its bytes are answered: a code other than wire.RetCodeSuccess
+	// is the item's answer instead of the data (a DBREAD item takes the
+	// first refused range's code). It runs while the areas are locked for
+	// reading: it must return quickly and must not call Read, Write or
+	// Close of the server.
+	CheckRead func(it Item) byte
+	// OnWrite, when set, is asked for each write item the server would
+	// apply (a registered, writable area, within its bounds, data of the
+	// addressed size), with no lock held: wire.RetCodeSuccess applies the
+	// item; any other code is the item's answer and the area is left as it
+	// was. data is the item's bytes as the client sent them (for a bit
+	// item one byte, the bit in bit 0), a copy the hook may change: what it
+	// leaves there is applied (a host whose source took another value than
+	// the client sent). The client waits for the job's
+	// answer while it runs; ctx ends when the server is closed. The items of
+	// a job are asked in their order, each applied before the next is
+	// asked, so with OnWrite set a job does not change memory as one step.
+	// It may call Read and Write of the server. Close waits for the
+	// connection that runs it, so a hook that stops the server calls
+	// go Close(): Close ends ctx and completes once the hook returns. A hook
+	// that ignores ctx holds Close until it returns.
+	//
+	// The hooks run on the connection's goroutine and are not recovered: a
+	// hook that panics ends the program.
+	OnWrite func(ctx context.Context, it Item, data []byte) byte
+}
+
+// Item is one item of a client's job on a registered area, as
+// Config.CheckRead and Config.OnWrite are asked about it.
+type Item struct {
+	// Client is the remote address of the connection the job came on.
+	Client net.Addr
+	Area   Area
+	// DB is the data block number on AreaDB and 0 elsewhere.
+	DB int
+	// Start is the first byte addressed; on timers and counters 2n for
+	// element n.
+	Start int
+	// Size is the number of bytes addressed: 1 for a bit item.
+	Size int
+	// Bit is the bit (0..7) of a bit item, -1 for any other item.
+	Bit int
 }
 
 func (c Config) withDefaults() (Config, error) {
@@ -84,6 +128,9 @@ type Server struct {
 	closed    bool
 	wg        sync.WaitGroup
 	slots     chan struct{}
+	// hooks is the context Config.OnWrite runs with; Close ends it.
+	hooks    context.Context
+	endHooks context.CancelFunc
 
 	afterAddConn func()
 }
@@ -94,7 +141,10 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	hooks, endHooks := context.WithCancel(context.Background())
 	return &Server{
+		hooks:     hooks,
+		endHooks:  endHooks,
 		cfg:       cfg,
 		mem:       newMemory(),
 		listeners: make(map[net.Listener]struct{}),
@@ -196,7 +246,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 // Close stops all listeners and closes every connection, then waits for
 // their goroutines: when it returns, no goroutine of an accepted connection
 // is running or still to start. Close is safe to call more than once and
-// from multiple goroutines; every call waits and returns nil.
+// from multiple goroutines; every call waits and returns nil. It ends the
+// context of Config.OnWrite and waits for a hook in progress: a hook calls
+// go Close(), not Close.
 func (s *Server) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -205,6 +257,7 @@ func (s *Server) Close() error {
 		return nil
 	}
 	s.closed = true
+	s.endHooks()
 	for ln := range s.listeners {
 		_ = ln.Close()
 	}
@@ -277,7 +330,7 @@ func (s *Server) serveConn(raw net.Conn) {
 	}
 	defer func() { _ = conn.Close() }()
 	log.Info("s7 connection open")
-	sess := &session{srv: s, pduSize: s.cfg.MaxPDUSize, log: log}
+	sess := &session{srv: s, pduSize: s.cfg.MaxPDUSize, log: log, client: raw.RemoteAddr()}
 	for {
 		ctx, cancel := s.requestContext()
 		req, err := conn.ReadTSDU(ctx)

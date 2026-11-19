@@ -798,6 +798,16 @@ type Config struct {
     HandshakeTimeout time.Duration // COTP connect, default 5s
     IdleTimeout      time.Duration // close a connection with no request, or that takes no answer, for this long; 0 = none
     Logger           *slog.Logger  // nil = silent
+    CheckRead        func(it Item) byte                                        // nil = none; asked per read item / DBREAD range on a registered area, under the read lock; not RetCodeSuccess = that code instead of the data
+    OnWrite          func(ctx context.Context, it Item, data []byte) byte     // nil = none; asked per write item the server would apply, no lock held; RetCodeSuccess applies data (which it may change), another code is the item's answer; ctx ends at Close; may call Read/Write; stop the server with go Close(); not recovered
+}
+type Item struct {
+    Client net.Addr // the connection's remote address
+    Area   Area
+    DB     int      // AreaDB only
+    Start  int      // first byte; 2n for timer or counter element n
+    Size   int      // bytes addressed (1 for a bit item)
+    Bit    int      // 0..7 for a bit item, -1 otherwise
 }
 type AreaOptions struct{ ReadOnly bool }
 type Area byte // AreaInputs, AreaOutputs, AreaMerkers, AreaDB, AreaTimers, AreaCounters (2 bytes per element; element n at byte 2n)
@@ -813,7 +823,7 @@ Protocol behaviour follows the codes Siemens defines, as Wireshark's s7comm diss
 | Read Var | One result per item. Data transport sizes: BIT `0x03` (length 1 bit), BYTE/WORD/DWORD `0x04` (bits), INTEGER `0x05` (bits), DINTEGER `0x06` (bytes), REAL `0x07` (bytes), OCTET STRING `0x09` for CHAR, TIMER and COUNTER (bytes). An answer that would exceed the negotiated PDU: header error `0x8500` ("wrong frames"), no items |
 | Timers, counters | S7ANY with transport size TIMER `0x1D` on area T or COUNTER `0x1C` on area C, addressed by element number, 2 bytes per element. A write is refused with `0x03`, as a recorded CPU 315-2 PN/DP refuses it; the host-side `Write` sets them |
 | DBREAD items (syntax `0xB0`, S7-400) | Read only. One OCTET STRING item holding, per range, `0xFF` and the bytes read, without padding, as a recorded S7-400 answers WinCC. A range of a DB not held refuses the whole item with `0x0A`, past the end or of no bytes with `0x05` (the recordings hold no refused range). In a Write Var job: `0x05` |
-| Write Var | One return code per item |
+| Write Var | One return code per item. With `OnWrite` set, each item that passes the checks above is offered to it in order and applied only when it answers `0xFF` |
 | Item return codes | `0x0A` object does not exist (area or DB not held); `0x05` invalid address (item neither S7ANY nor DBREAD, zero count, more than one bit, a byte item not starting on a byte, a span past the end, a TIMER or COUNTER transport size outside its area or another transport size on timers or counters); `0x06` data type not supported (transport size not taken, e.g. DATE_AND_TIME); `0x07` data type inconsistent (write data length unequal to the addressed size); `0x03` accessing the object not allowed (write to a read-only area, a timer or a counter; Siemens 03H "Object access is not allowed", [ERRORS.md](ERRORS.md#refused-access-item-codes-and-header-errors)). Snap7-based servers send `0x0A` here instead |
 | Other jobs (block transfer, PLC control, …), a PDU that is not a job, a malformed job | Ack-Data with header error `0x8104` ("service not implemented on the module or a frame error"), the function code as parameter |
 | User data (SZL, clock, block info, …) | User data response, same function group, subfunction and sequence number, parameter error `0x8104`, return code `0x0A` |

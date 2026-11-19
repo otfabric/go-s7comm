@@ -5,13 +5,16 @@
 **Date:** 2026-11-19
 **Previous release:** v0.17.1
 
-Minor release. Two client operations, one type and four `wire` identifiers are added; no exported identifier is removed or changed. One behaviour changes, under "Breaking".
+Minor release. Two client operations, one client type, four `wire` identifiers, two `server.Config` fields and one `server` type are added; no exported identifier is removed or changed. One behaviour changes, under "Breaking". A server without the new fields answers as before.
 
 ### Added
 
 - **`Client.ReadMulti`** reads several areas, packing as many as fit the negotiated PDU, at most 20, into one Read Var request; an area too large for one answer is read alone, chunked as `ReadArea` reads it. One `*ReadResult` per address, never nil. Contributed by @MatthewReed303 ([#41](https://github.com/otfabric/go-s7comm/pull/41)).
 - **`Client.WriteMulti`** and **`WriteItem`** write several areas, packing as many as fit the PDU, at most 20, into one Write Var request. One error per item: nil, or the item's return code; an answer that does not match its request wraps `ErrProtocolFailure`. Contributed by @MatthewReed303 ([#41](https://github.com/otfabric/go-s7comm/pull/41)).
 - `wire.EncodeWriteVarItemsRequest` (`wire.WriteVarItem`), `wire.WriteVarItemSize`, `wire.IsElementArea` and `wire.ElementAreaBytes`.
+- **`server.Config.CheckRead`**: asked for each read item, and each range of a DBREAD item, that addresses a registered area within its bounds; a code other than `0xFF` is answered instead of the data. A host serving values it does not hold as good (a source that is down) refuses the item with the code it chooses. Contributed by @MatthewReed303 ([#42](https://github.com/otfabric/go-s7comm/pull/42)).
+- **`server.Config.OnWrite`**: asked for each write item the server would apply, with no lock held and a context that `Close` ends; `0xFF` applies the item's data, which the hook may change first (the value its source took), any other code is the item's answer and the area is unchanged. A host forwards a client's write to its own source this way. It may call the server's `Read` and `Write`; a hook that stops the server calls `go Close()`, since `Close` waits for it. The hooks are not recovered: a panic ends the program. Contributed by @MatthewReed303 ([#42](https://github.com/otfabric/go-s7comm/pull/42)).
+- **`server.Item`**: the item as the hooks see it: the client's address, area, DB number, first byte, size and bit.
 
 ### Breaking
 
@@ -19,7 +22,7 @@ Minor release. Two client operations, one type and four `wire` identifiers are a
 
 ### Documentation
 
-- API.md (read/write notes, `wire` listing), ERRORS.md (outcome model of `ReadMulti` and `WriteMulti`), LIMITATIONS.md (20 items per request), TESTING.md (row L3, e2e and unit tiers), docs/FEATURE-STATUS.md (v0.18.x, timer and counter areas, multi-item rows).
+- API.md (read/write notes, `wire` listing, `server` config and Write Var row), ERRORS.md (outcome model of `ReadMulti` and `WriteMulti`), ARCHITECTURE.md (locking with `OnWrite`), LIMITATIONS.md (20 items per request, the hooks' contract), TESTING.md (row L3; server rows L9 to L11; e2e, unit and server tiers), docs/FEATURE-STATUS.md (v0.18.x, timer and counter areas, multi-item and hook rows). The doc comments of `server.Config.CheckRead`, `server.Config.OnWrite` and `Server.Close` state what a hook may call and how it stops the server.
 
 ### Tests
 
@@ -29,6 +32,8 @@ Minor release. Two client operations, one type and four `wire` identifiers are a
 - `client/multi_gaps_test.go`: a deadline in the pause between two requests of `ReadMulti` and `WriteMulti`, a context that ends between two chunks of a write, `WriteArea` with an ended context, a pause that would start after `Close`, a transport timeout classified as status timeout, and encoder refusals that send nothing. `client/multi.go` and `client/readwrite.go` are covered in full.
 - `e2e/multi_test.go`: write then read back with `WriteMulti` and `ReadMulti`; 300 multi-item calls with every answer corrupted. The simulated PLC of `e2e/` answers jobs of several items.
 - `wire/multi_test.go`: S7ANY items of timers and counters, `EncodeWriteVarItemsRequest` decoded by `ParseWriteVarRequest`, its limits.
+- `server/hooks_test.go` with this module's client: an accepted and a refused byte write, a bit write, a hook changing the data it accepts, items the server refuses never offered, a multi-item job offered in order with one item refused, `Close` ending a hook's context, refused read items in single and multi-item reads; `server/hooks_internal_test.go`: DBREAD ranges asked one by one, one refused range refusing the item.
+- `server/hooks_lifecycle_test.go`: `OnWrite` calling `Read` and `Write` (L9), a hook that stops the server with `go Close()` (L10), a hook that ignores its context holding `Close` (L11), four clients sending multi-item jobs while the host reads and writes, with both hooks set (`-race`). `TestChaosRealCPUJobsWithHooks`: the 20,000 mutated jobs with both hooks refusing every third item.
 
 ---
 
